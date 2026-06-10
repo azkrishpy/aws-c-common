@@ -228,7 +228,6 @@ int aws_thread_current_at_exit(aws_thread_atexit_fn *callback, void *user_data);
  *
  * aws_thread_join_all_managed() will not return until this count has gone to zero.
  */
-AWS_COMMON_API void aws_thread_increment_unjoined_count(void);
 
 /**
  * Decrements the count of unjoined threads in the managed thread system.  Used by managed threads and
@@ -237,7 +236,6 @@ AWS_COMMON_API void aws_thread_increment_unjoined_count(void);
  *
  * aws_thread_join_all_managed() will not return until this count has gone to zero.
  */
-AWS_COMMON_API void aws_thread_decrement_unjoined_count(void);
 
 /**
  * Gets name of the current thread.
