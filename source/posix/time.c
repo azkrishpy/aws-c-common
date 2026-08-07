@@ -2,6 +2,19 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
+
+/*
+ * aws-c-common is compiled with strict feature-test macros (_POSIX_C_SOURCE / _XOPEN_SOURCE,
+ * see CMakeLists.txt), under which glibc does not declare timegm(). Request the default (BSD/misc)
+ * features so <time.h> declares timegm() itself. This is important on 32-bit platforms with a
+ * 64-bit time_t (e.g. arm32 with _TIME_BITS=64): glibc redirects timegm() to __timegm64() in the
+ * header, and relying on that declaration keeps time_t sizes consistent. Hand-declaring timegm()
+ * bypasses the redirect and calls the legacy 32-bit symbol, producing wrong timestamps.
+ */
+#if !defined(__APPLE__)
+#    define _DEFAULT_SOURCE /* NOLINT(bugprone-reserved-identifier) */
+#endif
+
 #include <aws/common/time.h>
 
 #if defined(__ANDROID__) && !defined(__LP64__)
@@ -58,11 +71,6 @@ time_t aws_timegm(struct tm *const t) {
 }
 
 #else
-
-#    ifndef __APPLE__
-/* glibc.... you disappoint me.. */
-extern time_t timegm(struct tm *);
-#    endif
 
 time_t aws_timegm(struct tm *const t) {
     return timegm(t);
