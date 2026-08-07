@@ -2,6 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0.
  */
+
+/* Needed so glibc's <time.h> declares timegm(). Defining it here (before any
+ * system header is pulled in transitively) lets glibc apply its _TIME_BITS=64
+ * redirect (timegm -> __timegm64) on 32-bit platforms. The previous hand-rolled
+ * "extern time_t timegm(struct tm *);" prototype bypassed that redirect, so on
+ * arm32 builds with 64-bit time_t the return value was truncated and every
+ * date parsing test failed. */
+#ifndef _GNU_SOURCE
+#    define _GNU_SOURCE
+#endif
+
 #include <aws/common/time.h>
 
 #if defined(__ANDROID__) && !defined(__LP64__)
@@ -58,11 +69,6 @@ time_t aws_timegm(struct tm *const t) {
 }
 
 #else
-
-#    ifndef __APPLE__
-/* glibc.... you disappoint me.. */
-extern time_t timegm(struct tm *);
-#    endif
 
 time_t aws_timegm(struct tm *const t) {
     return timegm(t);
