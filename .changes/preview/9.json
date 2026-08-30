@@ -1,0 +1,7 @@
+{
+  "pr": 9,
+  "type": "fix",
+  "summary": "Guard against zero-size reallocation.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/9",
+  "notes": ""
+}
