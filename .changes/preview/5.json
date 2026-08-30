@@ -1,0 +1,7 @@
+{
+  "pr": 5,
+  "type": "fix",
+  "summary": "Tidy an allocator comment.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/5",
+  "notes": ""
+}
