@@ -1,0 +1,7 @@
+{
+  "pr": 10,
+  "type": "feat",
+  "summary": "Introduce arena allocator API.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/10",
+  "notes": ""
+}
