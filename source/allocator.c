@@ -429,3 +429,5 @@ void aws_wrapped_cf_allocator_destroy(CFAllocatorRef allocator) {
 /* changelog test D */
 
 /* changelog test B */
+
+/* changelog test E */
