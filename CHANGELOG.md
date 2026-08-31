@@ -3,7 +3,8 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Fixes
+- Handle EINTR in pipe read loop. (#17)
 <!-- changelog:preview:end -->
 
 ## [0.15.1] — 2026-08-31
