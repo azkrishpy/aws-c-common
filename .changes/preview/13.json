@@ -1,0 +1,7 @@
+{
+  "pr": 13,
+  "type": "fix",
+  "summary": "Correct byte-buf append bounds check.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/13",
+  "notes": ""
+}
