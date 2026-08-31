@@ -3,7 +3,8 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Fixes
+- Restore backward-compatible socket getter. (#21)
 <!-- changelog:preview:end -->
 
 ## [0.16.0] — 2026-08-31
