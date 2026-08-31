@@ -3,7 +3,8 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Features
+- Replace aws_socket_options struct layout. (#20)
 <!-- changelog:preview:end -->
 
 ## [0.15.2] — 2026-08-31
