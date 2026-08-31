@@ -1,0 +1,5 @@
+{
+  "version": "0.15.2",
+  "date": "2026-08-31",
+  "highlights": "EINTR handling and array-list helper."
+}
