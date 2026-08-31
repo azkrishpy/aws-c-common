@@ -3,6 +3,9 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
+### Features
+- Add aws_array_list_swap helper. (#18)
+
 ### Fixes
 - Handle EINTR in pipe read loop. (#17)
 <!-- changelog:preview:end -->
