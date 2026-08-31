@@ -1,0 +1,7 @@
+{
+  "pr": 18,
+  "type": "feat",
+  "summary": "Add aws_array_list_swap helper.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/18",
+  "notes": ""
+}
