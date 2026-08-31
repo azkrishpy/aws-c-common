@@ -3,5 +3,6 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Features
+- Add ring buffer utility. (#12)
 <!-- changelog:preview:end -->
