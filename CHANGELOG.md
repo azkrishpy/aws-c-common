@@ -3,7 +3,8 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Features
+- Add a thing. (#24)
 <!-- changelog:preview:end -->
 
 ## [0.16.1] — 2026-08-31
