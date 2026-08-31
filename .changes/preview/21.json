@@ -1,0 +1,7 @@
+{
+  "pr": 21,
+  "type": "fix",
+  "summary": "Restore backward-compatible socket getter.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/21",
+  "notes": ""
+}
