@@ -1,0 +1,7 @@
+{
+  "pr": 20,
+  "type": "feat",
+  "summary": "Replace aws_socket_options struct layout.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/20",
+  "notes": ""
+}
