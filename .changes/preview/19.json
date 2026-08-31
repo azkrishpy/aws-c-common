@@ -1,0 +1,7 @@
+{
+  "pr": 19,
+  "type": "fix",
+  "summary": "Zero-init allocator vtable padding.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/19",
+  "notes": ""
+}

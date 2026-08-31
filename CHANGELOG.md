@@ -8,6 +8,7 @@
 
 ### Fixes
 - Handle EINTR in pipe read loop. (#17)
+- Zero-init allocator vtable padding. (#19)
 <!-- changelog:preview:end -->
 
 ## [0.15.1] — 2026-08-31
