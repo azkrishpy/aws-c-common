@@ -3,13 +3,18 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
+_Nothing yet._
+<!-- changelog:preview:end -->
+
+## [0.15.2] — 2026-08-31
+Highlights: EINTR handling and array-list helper.
+
 ### Features
 - Add aws_array_list_swap helper. (#18)
 
 ### Fixes
 - Handle EINTR in pipe read loop. (#17)
 - Zero-init allocator vtable padding. (#19)
-<!-- changelog:preview:end -->
 
 ## [0.15.1] — 2026-08-31
 Highlights: Hash table double-free fix.
