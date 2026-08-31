@@ -1,0 +1,7 @@
+{
+  "pr": 14,
+  "type": "fix",
+  "summary": "Avoid double free in hash table cleanup.",
+  "url": "https://github.com/azkrishpy/aws-c-common/pull/14",
+  "notes": ""
+}

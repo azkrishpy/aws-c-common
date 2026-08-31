@@ -3,7 +3,8 @@
 <!-- changelog:preview:start -->
 ## [Preview]
 
-_Nothing yet._
+### Fixes
+- Avoid double free in hash table cleanup. (#14)
 <!-- changelog:preview:end -->
 
 ## [0.15.0] — 2026-08-31
