@@ -3,12 +3,16 @@
 <!-- changelog:unreleased -->
 ## [Unreleased]
 
+_Nothing yet._
+<!-- /changelog:unreleased -->
+
+## [1.0.2] — 2026-09-07
+
 ### Features
 - Add aws_byte_cursor_split for zero-copy tokenising. ([#1283](../../pull/1283))
 
 ### Fixes
 - Correct the byte-buf append bounds check. ([#1284](../../pull/1284))
-<!-- /changelog:unreleased -->
 
 ## [1.0.0]
 
