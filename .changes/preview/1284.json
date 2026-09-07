@@ -1,6 +1,0 @@
-{
-  "pr": 1284,
-  "type": "fix",
-  "summary": "Correct the byte-buf append bounds check",
-  "notes": ""
-}

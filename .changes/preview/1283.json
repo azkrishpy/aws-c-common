@@ -1,6 +1,0 @@
-{
-  "pr": 1283,
-  "type": "feat",
-  "summary": "Add aws_byte_cursor_split for zero-copy tokenising",
-  "notes": ""
-}
