@@ -1,0 +1,6 @@
+{
+  "pr": 1286,
+  "type": "feat",
+  "summary": "Add tcp_nodelay to aws_socket_options",
+  "notes": "aws_socket_options grew from 40 to 44 bytes. Source-compatible, but a native\nconsumer that embeds the struct must be rebuilt."
+}

@@ -3,7 +3,12 @@
 <!-- changelog:unreleased -->
 ## [Unreleased]
 
-_Nothing yet._
+### Features
+- Add tcp_nodelay to aws_socket_options. ([#1286](../../pull/1286))
+
+### Notes
+- [#1286](../../pull/1286) — aws_socket_options grew from 40 to 44 bytes. Source-compatible, but a native
+  consumer that embeds the struct must be rebuilt.
 <!-- /changelog:unreleased -->
 
 ## [1.0.2] — 2026-09-07
