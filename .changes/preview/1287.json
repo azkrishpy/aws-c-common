@@ -1,0 +1,6 @@
+{
+  "pr": 1287,
+  "type": "fix",
+  "summary": "Retry backoff off-by-one",
+  "notes": ""
+}
