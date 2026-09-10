@@ -6,6 +6,9 @@
 ### Features
 - Add tcp_nodelay to aws_socket_options. ([#1286](../../pull/1286))
 
+### Fixes
+- Retry backoff off-by-one. ([#1287](../../pull/1287))
+
 ### Notes
 - [#1286](../../pull/1286) — aws_socket_options grew from 40 to 44 bytes. Source-compatible, but a native
   consumer that embeds the struct must be rebuilt.
