@@ -4,14 +4,18 @@
 Unreleased changes can be found [here](../../blob/sim-1x-docs/CHANGELOG.md).
 <!-- /changelog:unreleased -->
 
-## [1.0.2] — 2026-09-07
+## [1.1.0] — 2026-09-11
 
-### Features
-- Add aws_byte_cursor_split for zero-copy tokenising. ([#1283](../../pull/1283))
+### Possible Breaking Changes
+- Add tcp_nodelay to aws_socket_options. ([#1286](../../pull/1286))
 
 ### Fixes
-- Correct the byte-buf append bounds check. ([#1284](../../pull/1284))
+- Retry backoff off-by-one. ([#1287](../../pull/1287))
 
-## [1.0.0]
+### Notes
+- [#1286](../../pull/1286) — aws_socket_options grew from 40 to 44 bytes. Source-compatible, but a native
+  consumer that embeds the struct must be rebuilt.
 
-Official release of 1.0.0.
+## Earlier releases
+
+- [1.0.x](.changes/1.0.x.md)
