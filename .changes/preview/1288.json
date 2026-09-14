@@ -1,0 +1,6 @@
+{
+  "pr": 1288,
+  "type": "fix",
+  "summary": "Handle EINTR in the pipe read loop",
+  "notes": ""
+}

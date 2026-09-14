@@ -3,7 +3,8 @@
 <!-- changelog:unreleased -->
 ## [Unreleased]
 
-_Nothing yet._
+### Fixes
+- Handle EINTR in the pipe read loop. ([#1288](../../pull/1288))
 <!-- /changelog:unreleased -->
 
 ## [1.1.0] — 2026-09-11
