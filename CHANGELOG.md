@@ -3,7 +3,12 @@
 <!-- changelog:unreleased -->
 ## [Unreleased]
 
-_Nothing yet._
+### Features
+- Replace the event-loop dispatch queue. ([#1289](../../pull/1289))
+
+### Notes
+- [#1289](../../pull/1289) — The old aws_event_loop_vtable layout is gone. Implementers of a custom event
+  loop must adopt the new vtable.
 <!-- /changelog:unreleased -->
 
 ## [1.1.1] — 2026-09-15
