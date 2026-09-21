@@ -1,6 +1,0 @@
-{
-  "pr": 1290,
-  "type": "feat",
-  "summary": "Add aws_uuid_to_compact_str",
-  "notes": ""
-}

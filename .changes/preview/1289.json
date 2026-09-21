@@ -1,6 +1,0 @@
-{
-  "pr": 1289,
-  "type": "feat",
-  "summary": "Replace the event-loop dispatch queue",
-  "notes": "The old aws_event_loop_vtable layout is gone. Implementers of a custom event\nloop must adopt the new vtable."
-}
