@@ -1,6 +1,0 @@
-{
-  "pr": 1291,
-  "type": "revert",
-  "summary": "Reverted the retry-default change",
-  "notes": "It changed behaviour customers relied on. A replacement lands in 1.3."
-}
