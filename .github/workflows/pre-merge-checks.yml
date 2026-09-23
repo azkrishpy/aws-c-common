@@ -63,7 +63,7 @@ jobs:
       checks: read
       statuses: write
     # TODO: pin back to @main once this workflow is on main.
-    uses: azkrishpy/aws-crt-builder/.github/workflows/pre-merge-checks.yml@forktest/builder
+    uses: azkrishpy/aws-crt-builder/.github/workflows/pre-merge-checks.yml@forktest/builder-stub
     with:
       lib-name: aws-c-common
       # Operand order matters: `cond && '' || 'x'` always yields 'x', because ''
