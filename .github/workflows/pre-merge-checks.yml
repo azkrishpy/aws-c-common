@@ -35,7 +35,7 @@ on:
   # the ABI job fails at credential configuration.
   pull_request:
     branches:
-      - chore/pre-merge
+      - forktest/base
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
 # Keyed on the pull request number: under pull_request_target github.ref is the
@@ -63,7 +63,7 @@ jobs:
       checks: read
       statuses: write
     # TODO: pin back to @main once this workflow is on main.
-    uses: awslabs/aws-crt-builder/.github/workflows/pre-merge-checks.yml@feat/pre-merge-checks
+    uses: azkrishpy/aws-crt-builder/.github/workflows/pre-merge-checks.yml@forktest/builder-stub
     with:
       lib-name: aws-c-common
       # Operand order matters: `cond && '' || 'x'` always yields 'x', because ''
