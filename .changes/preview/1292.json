@@ -1,0 +1,6 @@
+{
+  "pr": 1292,
+  "type": "fix",
+  "summary": "Leaking fd on socket teardown",
+  "notes": ""
+}
