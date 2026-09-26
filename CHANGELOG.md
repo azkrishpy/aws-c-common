@@ -4,6 +4,11 @@
 Unreleased changes can be found [here](../../blob/sim-1x-docs/CHANGELOG.md).
 <!-- /changelog:unreleased -->
 
+## [1.2.1] — 2026-09-26
+
+### Fixes
+- Leaking fd on socket teardown. ([#1292](../../pull/1292))
+
 ## [1.2.0] — 2026-09-21
 
 ### Possible Breaking Changes
