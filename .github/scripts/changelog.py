@@ -14,6 +14,7 @@ Directory layout, all on the working branch:
 import argparse
 import json
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -220,11 +221,9 @@ def audit_released(changes_dir):
     """
     errs = []
     changes_dir = Path(changes_dir)
-    for line in [changes_dir / "latest"]:
-        for rel in list_releases_in(line):
-            for f in sorted(rel.glob("*.json")):
-                if f.name == "_meta.json":
-                    continue
+    for rel in list_releases_in(changes_dir / "latest"):
+        for f in sorted(rel.glob("*.json")):
+            if f.name != "_meta.json":
                 errs.extend(validate_fragment(f))
     for e in errs:
         _err(e)
@@ -520,9 +519,7 @@ def _freeze_current_line(changes, latest, current_minor):
     # add one file per merged PR forever, for nothing that reads them; `git log
     # -- .changes` still has every one.
     for release_dir in list_releases_in(frozen_dir):
-        for f in release_dir.iterdir():
-            f.unlink()
-        release_dir.rmdir()
+        shutil.rmtree(release_dir)
     latest.mkdir(parents=True, exist_ok=True)
     return None
 

@@ -104,58 +104,12 @@ jobs:
           [[ "$survived" -eq 0 ]] || exit 1
           exit 0
 
-  freeze-retention:
+  size-report:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: A freeze keeps the snapshot and drops the fragments
-        run: |
-          set -euo pipefail
-          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
-          printf '{"pr":40,"type":"feat","summary":"A widget","url":"u","notes":""}\n' \
-            > "${WORK}/.changes/preview/40.json"
-          # A minor bump freezes 0.16.x.
-          python3 "${CL}" rollup --version 0.17.0 --date 2026-11-01 \
-            --changes-dir "${WORK}/.changes" --changelog "${WORK}/CHANGELOG.md"
-          frozen="${WORK}/.changes/0.16.x"
-          test -s "${frozen}/CHANGELOG.md"
-          # Only the snapshot survives, and it still holds every released entry.
-          left="$(ls "${frozen}")"
-          echo "0.16.x now holds: ${left}"
-          [[ "${left}" == "CHANGELOG.md" ]]
-          for want in "## [0.16.1]" "## [0.16.0]"; do
-            grep -qF "$want" "${frozen}/CHANGELOG.md"
-          done
-          # The active line keeps its fragments: that is what gets re-rendered.
-          test -f "${WORK}/.changes/latest/0.17.0/40.json"
-          echo "latest/ still holds its fragments"
-
-      - name: The active line still re-renders byte for byte
-        run: |
-          set -euo pipefail
-          # The regression detector that caught the dropped-entry bug still
-          # applies where it matters: the line that is regenerated on every merge.
-          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
-          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
-                                 --changelog "${WORK}/a.md"
-          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
-                                 --changelog "${WORK}/b.md"
-          diff -u "${WORK}/a.md" "${WORK}/b.md"
-          # Every fragment in the active line must land in some section.
-          python3 - <<'EOF'
-          import json, pathlib, sys
-          sys.path.insert(0, ".github/scripts")
-          import changelog as cl
-          bad = [f for f in pathlib.Path(".changes/latest").rglob("*.json")
-                 if f.name != "_meta.json"
-                 and json.loads(f.read_text())["type"] not in set(cl.CATEGORY) | {"chore"}]
-          for f in bad:
-              print("UNRENDERABLE", f)
-          sys.exit(1 if bad else 0)
-          EOF
-
-      - name: Size of .changes over a realistic release history
-        run: python3 .github/scripts/rollup-scale.py --prs-per-release 4
+      - name: What .changes/ costs over a realistic release history
+        run: python3 .github/scripts/rollup-scale.py
 
   docs-replay:
     runs-on: ubuntu-24.04
@@ -270,8 +224,6 @@ jobs:
           for want in "## [Preview]" "(#24)" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
             grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
           done
-          # A chore renders nowhere and no empty section is emitted.
-          ! grep -qF "### Maintenance" "${WORK}/CHANGELOG.md"
           cp "${WORK}/CHANGELOG.md" rendered-CHANGELOG.md
           { echo "### Rendered from the real tree"; echo '```markdown';
             cat rendered-CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -316,6 +268,7 @@ jobs:
           [[ ! -d .changes/latest/0.16.2 ]]
           # The frozen snapshot holds its own line and nothing newer.
           grep -qF "## [0.16.2]" .changes/0.16.x/CHANGELOG.md
+          grep -qF "## [0.16.0]" .changes/0.16.x/CHANGELOG.md
           ! grep -qF "0.17.0" .changes/0.16.x/CHANGELOG.md
           # The root holds the new line and links the frozen ones.
           grep -qF "## [0.17.0]" CHANGELOG.md

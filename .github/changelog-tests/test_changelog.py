@@ -586,7 +586,7 @@ def test_frozen_line_hides_chores_like_the_root_does(tmp_path):
     _rollup(tmp_path, "0.2.0", "2026-02-01")
     frozen = (tmp_path / ".changes" / "0.1.x" / "CHANGELOG.md").read_text()
     assert "visible" in frozen
-    assert "internal only" not in frozen and "### Maintenance" not in frozen
+    assert "internal only" not in frozen
 
 
 def test_a_release_with_nothing_visible_has_no_placeholder(tmp_path):

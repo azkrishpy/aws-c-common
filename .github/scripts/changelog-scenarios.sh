@@ -23,7 +23,6 @@ frag() {
 # expect <rc> <reason> <pr> <title> [extra args...]
 expect() {
   local want_rc="$1" want_reason="$2" pr="$3" title="$4"; shift 4
-  local LABEL="${LABEL:-}"
   local out rc reason
   out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
            --changes-dir "${WORK}/.changes" "$@" 2>&1)"; rc=$?

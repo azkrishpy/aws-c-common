@@ -2,15 +2,14 @@
 """Replay a realistic release history through rollup and measure what .changes/ costs.
 
 Shaped on aws-c-common's actual history (213 releases across 14 minor lines,
-median 10 patches per line, busiest 69) so the numbers mean something. Compares
-the per-PR-file layout this tool uses against the aws-sdk-java-v2 layout, which
-collapses each released version into a single JSON.
+median 10 patches per line, busiest 69) so the numbers mean something.
 
-    rollup-scale.py [--prs-per-release N] [--out DIR]
+Reports only what it measures. For comparison, measured from the GitHub API:
+aws-sdk-java-v2 keeps 1855 files / 3.83 MB under .changes (one JSON per released
+version, retained forever); aws-sdk-go-v2 keeps 1 (released fragments deleted).
 
 Writes nothing outside a scratch directory.
 """
-import argparse
 import json
 import pathlib
 import shutil
@@ -32,7 +31,6 @@ def sh(*args):
     if r.returncode != 0:
         print(r.stdout, r.stderr, file=sys.stderr)
         raise SystemExit(f"rollup failed: {' '.join(args)}")
-    return r
 
 
 def tree_cost(root):
@@ -46,24 +44,20 @@ def tree_cost(root):
     }
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--prs-per-release", type=int, default=4)
-    ap.add_argument("--out")
-    args = ap.parse_args()
+PRS_PER_RELEASE = 4
 
-    work = pathlib.Path(args.out) if args.out else pathlib.Path(tempfile.mkdtemp())
+
+def main():
+    work = pathlib.Path(tempfile.mkdtemp())
     changes = work / ".changes"
     changelog = work / "CHANGELOG.md"
     (changes / "preview").mkdir(parents=True, exist_ok=True)
 
     pr = 0
     releases = 0
-    per_release_entries = []
     for minor, patches in HISTORY:
         for patch in range(patches):
-            n = args.prs_per_release
-            for _ in range(n):
+            for _ in range(PRS_PER_RELEASE):
                 pr += 1
                 typ = ("feat", "fix", "fix", "chore")[pr % 4]
                 (changes / "preview" / f"{pr}.json").write_text(json.dumps({
@@ -72,36 +66,25 @@ def main():
                     "url": f"https://github.com/azkrishpy/aws-c-common/pull/{pr}",
                     "notes": "",
                 }, indent=2) + "\n")
-            per_release_entries.append(n)
             sh("rollup", "--version", f"0.{minor}.{patch}",
                "--date", "2026-01-01", "--changes-dir", str(changes),
                "--changelog", str(changelog))
             releases += 1
 
     ours = tree_cost(changes)
-    # The java-v2 layout: one JSON per released version, holding every entry.
-    java_files = releases + len(HISTORY)          # version files + per-line dirs' contents
-    java_bytes = sum(200 + 160 * e for e in per_release_entries)
-
     root = changelog.read_text()
     earlier = root.count("- [0.")
 
     print(f"replayed {releases} releases across {len(HISTORY)} minor lines, "
-          f"{pr} PRs ({args.prs_per_release} per release)\n")
-    print(f"{'':22} {'this tool':>12} {'java-v2 shape':>14}")
-    print(f"{'files under .changes/':22} {ours['files']:>12} {java_files:>14}")
-    print(f"{'  of which JSON':22} {ours['json_files']:>12} {releases:>14}")
-    print(f"{'directories':22} {ours['dirs']:>12} {len(HISTORY):>14}")
-    print(f"{'bytes':22} {ours['bytes']:>12,} {java_bytes:>14,}")
+          f"{pr} PRs ({PRS_PER_RELEASE} per release)\n")
+    print(f"{'files under .changes/':22} {ours['files']:>8}")
+    print(f"{'  of which JSON':22} {ours['json_files']:>8}")
+    print(f"{'directories':22} {ours['dirs']:>8}")
+    print(f"{'bytes':22} {ours['bytes']:>8,}")
     print(f"\nroot CHANGELOG.md: {len(root.splitlines())} lines, "
           f"{earlier} 'Earlier releases' links")
     print(f"frozen snapshots: {len(list(changes.glob('*.x/CHANGELOG.md')))}")
-    biggest = max(changes.glob("*.x"), key=lambda d: len(list(d.rglob('*.json'))))
-    print(f"biggest frozen line: {biggest.name} with "
-          f"{len(list(biggest.rglob('*.json')))} JSON files in "
-          f"{len(list(p for p in biggest.iterdir() if p.is_dir()))} version dirs")
-    if not args.out:
-        shutil.rmtree(work)
+    shutil.rmtree(work)
 
 
 if __name__ == "__main__":
