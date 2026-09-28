@@ -11,11 +11,14 @@ top-level [`CHANGELOG.md`](../CHANGELOG.md) is derived from these.
 ├── latest/                    # active minor line
 │   └── <version>/  { *.json } # per-patch fragment dir (e.g. 0.30.0/, 0.30.1/)
 ├── <M>.<N>.x/                 # frozen prior minor line
-│   ├── <M>.<N>.0/  { *.json }
-│   ├── <M>.<N>.1/  { *.json }
-│   └── CHANGELOG.md           # frozen snapshot for this minor line
+│   └── CHANGELOG.md           # frozen snapshot: the whole archive for that line
 └── …
 ```
+
+Freezing a minor line deletes its fragments and keeps only the snapshot.
+Nothing reads a frozen fragment — every release guard works off directory names,
+and a snapshot is never regenerated. Keeping them would add one checked-out file
+per merged PR forever; `git log -- .changes` still has every one.
 
 ## Fragment schema
 
@@ -47,6 +50,7 @@ moves into `latest/<version>/` at release time.
 | currently in-flight | `preview/*.json` on `main`, or the rendered view on the `docs` branch |
 | in the current minor line (`X.Y.*`) | root [`CHANGELOG.md`](../CHANGELOG.md) |
 | in a prior minor line (`A.B.*`) | `.changes/A.B.x/CHANGELOG.md` |
+| the fragment behind an archived entry | `git log -- .changes` |
 | exact set for a tag | GitHub Release page for that tag |
 
 > Note: filesystem lex sort places `0.10.x/` before `0.2.x/`. The rendered `CHANGELOG.md` files are semver-sorted, so only raw `ls .changes/` looks out of order.
