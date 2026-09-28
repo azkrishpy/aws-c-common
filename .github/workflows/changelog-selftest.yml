@@ -55,14 +55,14 @@ jobs:
           IN_DOCS: ${{ inputs.docs-branch }}
         run: |
           set -euo pipefail
-          DEFAULT_BRANCH="${IN_DEFAULT:-main}"
-          DOCS_BRANCH="${IN_DOCS:-docs}"
+          DEFAULT_BRANCH="${IN_DEFAULT:-}"; DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+          DOCS_BRANCH="${IN_DOCS:-}"; DOCS_BRANCH="${DOCS_BRANCH:-docs}"
           echo "default-branch = ${DEFAULT_BRANCH}"
           echo "docs-branch    = ${DOCS_BRANCH}"
           [[ -n "$DEFAULT_BRANCH" && -n "$DOCS_BRANCH" ]]
           # On a push event both inputs are empty, which must yield the defaults.
-          if [[ -z "${IN_DEFAULT}" ]]; then [[ "$DEFAULT_BRANCH" == "main" ]]; fi
-          if [[ -z "${IN_DOCS}" ]]; then [[ "$DOCS_BRANCH" == "docs" ]]; fi
+          if [[ -z "${IN_DEFAULT:-}" ]]; then [[ "$DEFAULT_BRANCH" == "main" ]]; fi
+          if [[ -z "${IN_DOCS:-}" ]]; then [[ "$DOCS_BRANCH" == "docs" ]]; fi
           echo "### Branch names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "| input | resolved |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "|---|---|" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -231,6 +231,149 @@ jobs:
           echo "authoring a retired type: rc=${rc} (want 1)"
           [[ "$rc" -eq 1 ]] || exit 1
           exit 0
+
+  docs-replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Replay merges onto a stand-in docs branch, in a scratch repo
+        run: |
+          set -euo pipefail
+          # Runs .github/scripts/docs-replay.sh -- the same file CI uses -- with
+          # test-main/test-docs standing in for main/docs. No real branch, no
+          # remote, no deploy key. PUSH=false keeps it local.
+          REPLAY="${GITHUB_WORKSPACE}/.github/scripts/docs-replay.sh"
+          WORK="$(mktemp -d)"; cd "$WORK"
+          git init -q -b test-main .
+          git config user.name t; git config user.email t@t
+          mkdir -p .changes/preview
+          cp -r "${GITHUB_WORKSPACE}/.changes/latest" .changes/latest
+          cp -r "${GITHUB_WORKSPACE}/.changes/0.15.x" .changes/0.15.x
+          git add -A && git commit -q -m "seed released history"
+
+          export CHANGELOG_PY="${GITHUB_WORKSPACE}/.github/scripts/changelog.py"
+          export DEFAULT_BRANCH=test-main DOCS_BRANCH=test-docs PUSH=false
+
+          # --- merge 1: an author adds a fragment
+          printf '{"pr":40,"type":"feat","summary":"Add a widget","url":"u","notes":""}\n' \
+            > .changes/preview/40.json
+          git add -A && git commit -q -m "feat: add a widget (#40)"
+          TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY"
+
+          git checkout -q test-docs
+          grep -qF "Add a widget" CHANGELOG.md
+          grep -qF "## [Preview]" CHANGELOG.md
+          echo "merge 1: docs CHANGELOG.md carries the preview entry"
+
+          # The release branch must never receive a bot commit.
+          git checkout -q test-main
+          [[ ! -f CHANGELOG.md ]] || { echo "release branch gained CHANGELOG.md" >&2; exit 1; }
+          [[ "$(git rev-list --count test-main)" == "2" ]]
+          echo "merge 1: release branch untouched"
+
+          # --- merge 2: a release rolls the fragment up
+          python3 "$CHANGELOG_PY" rollup --version 0.17.0 --date 2026-11-01 \
+            --changes-dir .changes --changelog CHANGELOG.md
+          git add -A && git commit -q -m "chore(release): 0.17.0"
+          TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY"
+
+          git checkout -q test-docs
+          grep -qF "## [0.17.0]" CHANGELOG.md
+          grep -qF "Add a widget" CHANGELOG.md
+          grep -qF "## [Preview]" CHANGELOG.md
+          [[ -f .changes/0.16.x/CHANGELOG.md ]]
+          echo "merge 2: docs shows the release and still has a Preview block"
+
+          # --- idempotence: replaying the same sha again changes nothing
+          BEFORE="$(git rev-parse test-docs)"
+          git checkout -q test-main
+          TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY" || true
+          git checkout -q test-docs
+          echo "docs before=${BEFORE} after=$(git rev-parse test-docs)"
+
+          { echo "### docs branch CHANGELOG.md after the replay"; echo '```markdown';
+            cat CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+      - name: Defaults apply when no override is set
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"; cd "$WORK"
+          git init -q .; git config user.name t; git config user.email t@t
+          git commit -q --allow-empty -m base
+          # No DEFAULT_BRANCH/DOCS_BRANCH in the environment: the script must
+          # resolve main and docs, which it states on its first line.
+          out="$(TRIGGER_SHA="$(git rev-parse HEAD)" \
+                 CHANGELOG_PY="${GITHUB_WORKSPACE}/.github/scripts/changelog.py" \
+                 PUSH=false bash "${GITHUB_WORKSPACE}/.github/scripts/docs-replay.sh" 2>&1 | head -1 || true)"
+          echo "$out"
+          [[ "$out" == *"from main onto docs"* ]]
+
+  seed-and-waiver:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Seeding a template, and the skip-changelog waiver
+        run: |
+          set -uo pipefail +e
+          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
+          pass=0; fail=0
+          ok() { echo "ok    $1"; pass=$((pass+1)); }
+          no() { echo "FAIL  $1"; fail=$((fail+1)); }
+
+          # seed writes a template the author can commit as-is, and the result
+          # must satisfy the very check that asked for it.
+          python3 "${CL}" seed --pr 77 --title "feat: add a knob" \
+            --url "https://github.com/o/r/pull/77" --changes-dir "${WORK}/.changes" >/dev/null
+          f="${WORK}/.changes/preview/77.json"
+          [[ -f "$f" ]] && ok "seed wrote $f" || no "seed wrote nothing"
+          python3 -c "
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d['pr']==77 and d['type']=='feat', d
+          assert d['summary'], 'summary must not be empty'
+          " "$f" && ok "seeded fragment has pr, type and summary" \
+                  || no "seeded fragment is malformed"
+          python3 "${CL}" check --pr 77 --title "feat: add a knob" \
+            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
+          [[ $? -eq 0 ]] && ok "check accepts what seed produced" \
+                         || no "check rejects what seed produced"
+
+          # A revert seeded from the Revert button keeps neither the original
+          # type prefix nor its number.
+          python3 "${CL}" seed --pr 78 --title 'Revert "feat: add SSO (#843)"' \
+            --url u --changes-dir "${WORK}/.changes" >/dev/null
+          python3 -c "
+          import json,sys
+          d=json.load(open(sys.argv[1]))
+          assert d['type']=='revert', d
+          assert '843' not in d['summary'] and 'feat:' not in d['summary'], d
+          " "${WORK}/.changes/preview/78.json" \
+            && ok "seeded revert drops the original prefix and number" \
+            || no "seeded revert kept the prefix or number"
+
+          # seed must refuse a placeholder PR number: it names the file.
+          python3 "${CL}" seed --pr 0 --title "feat: x" --url u \
+            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
+          [[ $? -ne 0 ]] && ok "seed refuses pr 0" || no "seed accepted pr 0"
+
+          echo; echo "seed-and-waiver: ${pass} passed, ${fail} failed"
+          echo "seed-and-waiver: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          [[ "$fail" -eq 0 ]] || exit 1
+          exit 0
+
+      - name: The skip-changelog label is what the caller gates on
+        run: |
+          set -euo pipefail
+          # The waiver is a job-level `if:` in the caller, not a script flag --
+          # assert the reusable workflow still expresses it that way.
+          grep -q "skip-changelog" .github/workflows/changelog-selftest.yml \
+            || true
+          if grep -rq "skip-changelog" .github/workflows/changelog-check.yml; then
+            echo "changelog-check.yml gates on the skip-changelog label"
+          else
+            echo "ERROR: no skip-changelog gate found in changelog-check.yml" >&2
+            exit 1
+          fi
 
   render-real-tree:
     runs-on: ubuntu-24.04

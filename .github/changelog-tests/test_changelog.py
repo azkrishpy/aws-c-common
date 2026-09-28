@@ -35,6 +35,12 @@ def _rollup(tmp_path, version, date, bump=None, highlights=""):
 
 # ---------- seed ----------
 
+def test_seed_refuses_a_placeholder_pr(tmp_path):
+    assert cl.main(["seed", "--pr", "0", "--title", "feat: x", "--url", "u",
+                    "--changes-dir", _changes(tmp_path)]) == 2
+    assert not (tmp_path / ".changes" / "preview" / "0.json").exists()
+
+
 def test_seed_writes_fragment(tmp_path):
     _seed(tmp_path, 843, "feat: Add SSO sign-in for enterprise accounts.")
     p = tmp_path / ".changes" / "preview" / "843.json"

@@ -275,6 +275,9 @@ def render_frozen_line(line_dir):
 # ---------- commands ----------
 
 def cmd_seed(args):
+    if args.pr <= 0:
+        _err(f"--pr must be the real pull request number, not {args.pr}")
+        return 2
     typ, summary = parse_title(args.title)
     if typ is None:
         typ = "chore"
