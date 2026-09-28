@@ -69,116 +69,77 @@ jobs:
           echo "| default-branch \`${IN_DEFAULT:-<unset>}\` | \`${DEFAULT_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "| docs-branch \`${IN_DOCS:-<unset>}\` | \`${DOCS_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-  check-scenarios:
+  scenarios:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Every check outcome, against a scratch tree
-        run: |
-          # Not -e: these scenarios expect non-zero exits and tally them.
-          set -uo pipefail +e
-          WORK="$(mktemp -d)"
-          mkdir -p "${WORK}/.changes/preview"
-          pass=0; fail=0
+      - name: Behavioural scenarios, asserted on rc and reason
+        run: bash .github/scripts/changelog-scenarios.sh
 
-          # expect <want-rc> <want-reason> <pr> <title> [extra args...]
-          expect() {
-            local want_rc="$1" want_reason="$2" pr="$3" title="$4"; shift 4
-            local out rc
-            out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
-                     --changes-dir "${WORK}/.changes" "$@" 2>&1)"; rc=$?
-            local reason
-            reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
-            if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
-              echo "ok    rc=$rc reason=$reason  <- $title"
-              pass=$((pass+1))
-            else
-              echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $title"
-              echo "$out" | sed 's/^/        /'
-              fail=$((fail+1))
-            fi
-          }
-
-          frag() {
-            printf '{"pr":%s,"type":"%s","summary":"%s","url":"u","notes":"%s"}\n' \
-              "$1" "$2" "$3" "${4:-}" > "${WORK}/.changes/preview/$1.json"
-          }
-
-          # A chore needs no fragment and may touch any preview fragment.
-          expect 0 exempt-type            1 "chore: bump a pin"
-          # A feat without one is author-fixable and earns a template.
-          expect 1 missing-fragment       2 "feat: add a thing"
-          # A title off-convention cannot yield a type at all.
-          expect 1 bad-title              3 "add a thing"
-          # The Revert button's title is accepted verbatim.
-          frag 4 revert "Reverted the retry default" "It changed behaviour customers relied on."
-          expect 0 ok                     4 'Revert "fix: retry default (#3)"'
-          # A valid fragment that agrees with the title.
-          frag 5 feat "Add SSO sign-in"
-          expect 0 ok                     5 "feat: add SSO sign-in"
-          # Fragment type disagreeing with the title.
-          frag 6 fix "Mislabelled"
-          expect 1 type-mismatch          6 "feat: add a thing"
-          # A fragment at the right path whose inner pr points elsewhere.
-          printf '{"pr":7,"type":"feat","summary":"Wrong number","url":"u","notes":""}\n' \
-            > "${WORK}/.changes/preview/8.json"
-          expect 1 pr-mismatch            8 "feat: add a thing"
-          # A bot author waives both the title convention and the fragment.
-          expect 0 waived-bot             9 "whatever" --bot-author dependabot[bot]
-
-          echo
-          echo "check scenarios: ${pass} passed, ${fail} failed"
-          echo "check scenarios: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          [[ "$fail" -eq 0 ]] || exit 1
-          exit 0
-
-  changed-paths:
+  mutation-check:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: The .changes/ integrity rules
+      - run: pip install --quiet pytest
+      - name: Every guard must have a check that dies without it
         run: |
-          # Not -e: these scenarios expect non-zero exits and tally them.
           set -uo pipefail +e
-          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
-          pass=0; fail=0
-          printf '{"pr":30,"type":"feat","summary":"Mine","url":"u","notes":""}\n' \
-            > "${WORK}/.changes/preview/30.json"
-          printf '{"pr":31,"type":"feat","summary":"Theirs","url":"u","notes":""}\n' \
-            > "${WORK}/.changes/preview/31.json"
+          # A green suite proves nothing unless removing a guard turns it red.
+          CLP=.github/scripts/changelog.py
+          cp "$CLP" /tmp/pristine.py
+          survived=0; killed=0
 
-          run_paths() {
-            local want_rc="$1" want_reason="$2" pr="$3" title="$4" label="$5"; shift 5
-            local pf="${WORK}/paths.$RANDOM"; : > "$pf"
-            for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e#*:}" >> "$pf"; done
-            local out rc reason
-            out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
-                     --changes-dir "${WORK}/.changes" --changed-paths-file "$pf" \
-                     --changes-prefix .changes 2>&1)"; rc=$?
-            reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
-            if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
-              echo "ok    rc=$rc reason=$reason  <- $label"; pass=$((pass+1))
+          mutate() {
+            local label="$1" py="$2"
+            cp /tmp/pristine.py "$CLP"
+            python3 -c "
+          import pathlib, sys
+          p = pathlib.Path('$CLP'); s = p.read_text()
+          ${py}
+          p.write_text(s)
+          "
+            if cmp -s /tmp/pristine.py "$CLP"; then
+              echo "BROKEN    ${label}  <- mutation matched nothing, fix the mutation"
+              survived=$((survived+1)); return
+            fi
+            if python3 -m pytest .github/changelog-tests -q >/tmp/mut.log 2>&1 \
+               && bash .github/scripts/changelog-scenarios.sh >>/tmp/mut.log 2>&1; then
+              echo "SURVIVED  ${label}  <- nothing covers this"
+              survived=$((survived+1))
             else
-              echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $label"
-              echo "$out" | sed 's/^/        /'; fail=$((fail+1))
+              echo "killed    ${label}"
+              killed=$((killed+1))
             fi
           }
 
-          run_paths 0 ok 30 "feat: mine" "adds exactly its own fragment" \
-            "added:.changes/preview/30.json"
-          run_paths 1 stray-fragment 30 "feat: mine" "also adds someone else's" \
-            "added:.changes/preview/30.json" "added:.changes/preview/9999.json"
-          run_paths 1 modified-fragment 30 "feat: mine" "rewrites an existing fragment" \
-            "modified:.changes/preview/30.json"
-          # A chore is exempt from the fragment rule AND may curate other
-          # fragments -- that is the point of a maintenance change.
-          run_paths 0 exempt-type 32 "chore: tidy past entries" "chore curates another entry" \
-            "modified:.changes/preview/31.json"
+          mutate "a placeholder pr number is accepted" \
+            "s = s.replace('elif pr <= 0:', 'elif False:')"
+          mutate "a retired type no longer renders" \
+            "s = s.replace('RENDER_CATEGORY = {', 'RENDER_CATEGORY = {}  # ', 1)"
+          mutate "seed accepts pr 0" \
+            "s = s.replace('if args.pr <= 0:', 'if False:')"
+          mutate "a stray fragment is tolerated" \
+            "s = s.replace('stray-fragment', 'ok')"
+          mutate "a modified fragment is tolerated" \
+            "s = s.replace('modified-fragment', 'ok')"
+          mutate "a version may go backwards" \
+            "s = s.replace('if highest is not None and new_tuple <= highest:', 'if False:')"
+          mutate "a frozen line may be reopened" \
+            "s = s.replace('if frozen.name == f\"{new_tuple[0]}.{new_tuple[1]}.x\":', 'if False:')"
+          mutate "a revert needs no notes" \
+            "s = s.replace('and not notes.strip():', 'and False:')"
+          mutate "the title convention is not enforced" \
+            "s = s.replace('bad-title', 'ok')"
+          mutate "an invalid released fragment is rendered anyway" \
+            "s = s.replace('if errs := audit_released(args.changes_dir):', 'if False:')"
+          mutate "a type mismatch is tolerated" \
+            "s = s.replace('type-mismatch', 'ok')"
 
+          cp /tmp/pristine.py "$CLP"
           echo
-          echo "changed-paths: ${pass} passed, ${fail} failed"
-          echo "changed-paths: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          [[ "$fail" -eq 0 ]] || exit 1
+          echo "mutation-check: ${killed} killed, ${survived} survived"
+          echo "mutation-check: ${killed} killed, ${survived} survived" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          [[ "$survived" -eq 0 ]] || exit 1
           exit 0
 
   frozen-snapshots-are-stable:

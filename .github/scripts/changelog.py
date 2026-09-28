@@ -33,6 +33,10 @@ RENDER_CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
 # chore is released but deliberately renders nowhere, so it is not a loss.
 HIDDEN_ON_RELEASE = {"chore"}
 
+# Every accepted type must either render or be deliberately hidden, or a
+# released entry could pass validation and still vanish from the output.
+assert set(RENDER_CATEGORY) | HIDDEN_ON_RELEASE == VALID_TYPES | set(RETIRED_CATEGORY)
+
 TITLE_RE = re.compile(
     r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
 )
@@ -231,13 +235,6 @@ def audit_released(changes_dir):
                 if f.name == "_meta.json":
                     continue
                 errs.extend(validate_fragment(f))
-                try:
-                    typ = json.loads(f.read_text()).get("type")
-                except (OSError, ValueError):
-                    continue
-                if typ not in RENDER_CATEGORY and typ not in HIDDEN_ON_RELEASE:
-                    errs.append(f"{f}: type {typ!r} renders nowhere; a released "
-                                f"entry would be lost")
     return errs
 
 
