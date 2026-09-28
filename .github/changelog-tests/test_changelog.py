@@ -91,6 +91,16 @@ def test_check_passes_when_fragment_present(tmp_path):
     ]) == 0
 
 
+def test_check_rejects_an_invalid_fragment(tmp_path, capsys):
+    _changes(tmp_path)
+    p = tmp_path / ".changes" / "preview" / "5.json"
+    p.write_text(json.dumps(
+        {"pr": 5, "type": "feat", "summary": "s", "url": "u", "notes": 7}))
+    assert cl.main(["check", "--pr", "5", "--title", "feat: x",
+                    "--changes-dir", _changes(tmp_path)]) == 1
+    assert "CHANGELOG_CHECK_REASON::invalid-fragment" in capsys.readouterr().out
+
+
 def test_check_fails_on_pr_mismatch(tmp_path):
     _seed(tmp_path, 5, "feat: hello")
     src = tmp_path / ".changes" / "preview" / "5.json"
@@ -640,6 +650,14 @@ def test_an_author_may_not_write_a_retired_type(tmp_path):
         {"pr": 3, "type": "doc", "summary": "s", "url": "u", "notes": ""}))
     assert cl.main(["check", "--pr", "3", "--title", "doc: x",
                     "--changes-dir", _changes(tmp_path)]) == 1
+
+
+def test_render_subcommand_writes_the_file(tmp_path):
+    _seed(tmp_path, 1, "feat: a thing")
+    out = tmp_path / "CHANGELOG.md"
+    assert cl.main(["render", "--changes-dir", _changes(tmp_path),
+                    "--changelog", str(out)]) == 0
+    assert "a thing" in out.read_text()
 
 
 def _release(tmp_path, line, version, meta=True, frag=True):

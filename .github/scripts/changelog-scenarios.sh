@@ -69,6 +69,10 @@ printf '{"pr":7,"type":"feat","summary":"Wrong number","url":"u","notes":""}\n' 
   > "${WORK}/.changes/preview/8.json"
 expect 1 pr-mismatch      8 "feat: add a thing"
 expect 0 waived-bot       9 "whatever" --bot-author "dependabot[bot]"
+# A fragment at the right path that fails the schema.
+printf '{"pr":11,"type":"feat","summary":"s","url":"u","notes":7}\n' \
+  > "${WORK}/.changes/preview/11.json"
+expect 1 invalid-fragment 11 "feat: a thing"
 # A type retired from the authoring set must be refused from a new author.
 printf '{"pr":10,"type":"doc","summary":"s","url":"u","notes":""}\n' \
   > "${WORK}/.changes/preview/10.json"
