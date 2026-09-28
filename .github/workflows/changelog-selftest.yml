@@ -181,37 +181,57 @@ jobs:
           [[ "$fail" -eq 0 ]] || exit 1
           exit 0
 
-  released-fragment-audit:
+  frozen-snapshots-are-stable:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Every fragment already released must still render
+      - name: A re-render must reproduce every committed snapshot byte for byte
         run: |
           set -euo pipefail
-          # Released history is immutable, but it is validated against today's
-          # schema. A type that was valid when it shipped and is not valid now
-          # renders nowhere, so a re-render silently drops a published entry.
+          # This is the regression that matters: released notes are immutable,
+          # but they are rendered by today's code. If a type retires, the entry
+          # must still render, or a merge silently deletes published history.
           python3 - <<'EOF'
-          import json, pathlib, sys
+          import difflib, pathlib, sys
           sys.path.insert(0, ".github/scripts")
           import changelog as cl
-          bad = []
-          for f in sorted(pathlib.Path(".changes").rglob("*.json")):
-              if f.name == "_meta.json":
+          bad = 0
+          for snap in sorted(pathlib.Path(".changes").glob("*.x/CHANGELOG.md")):
+              want = snap.read_text()
+              got = cl.render_frozen_line(snap.parent)
+              if got == want:
+                  print(f"identical  {snap}")
                   continue
-              try:
-                  t = json.loads(f.read_text()).get("type")
-              except Exception as e:
-                  bad.append((f, f"unparseable: {e}")); continue
-              # A released chore rendering nowhere is by design; a type that is
-              # no longer in VALID_TYPES at all is the schema having moved.
-              if t not in cl.VALID_TYPES:
-                  bad.append((f, f"type {t!r} is no longer valid, so it renders nowhere"))
-          for f, why in bad:
-              print(f"ORPHANED: {f}: {why}")
-          print(f"{len(bad)} orphaned fragment(s)")
+              bad += 1
+              print(f"DIFFERS    {snap}")
+              sys.stdout.writelines(difflib.unified_diff(
+                  want.splitlines(True), got.splitlines(True),
+                  f"{snap} (committed)", f"{snap} (re-rendered)"))
+          # Every released fragment must land in some section.
+          for f in sorted(pathlib.Path(".changes").rglob("*.json")):
+              if f.name == "_meta.json" or "preview" in f.parts:
+                  continue
+              import json
+              t = json.loads(f.read_text()).get("type")
+              if t not in cl.RENDER_CATEGORY and t not in cl.HIDDEN_ON_RELEASE:
+                  print(f"UNRENDERABLE {f}: type {t!r}"); bad += 1
+          print(f"{bad} problem(s)")
           sys.exit(1 if bad else 0)
           EOF
+
+      - name: A retired type is still refused from new authors
+        run: |
+          set -uo pipefail +e
+          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
+          printf '{"pr":99,"type":"doc","summary":"s","url":"u","notes":""}\n' \
+            > "${WORK}/.changes/preview/99.json"
+          python3 "${CL}" check --pr 99 --title "doc: something" \
+            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
+          rc=$?
+          echo "authoring a retired type: rc=${rc} (want 1)"
+          [[ "$rc" -eq 1 ]] || exit 1
+          exit 0
+
   render-real-tree:
     runs-on: ubuntu-24.04
     steps:

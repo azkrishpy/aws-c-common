@@ -603,6 +603,39 @@ def test_a_frozen_line_renders_a_degraded_tree(tmp_path):
     assert "## [0.29.0]" in text and "## [0.29.1]" not in text
 
 
+def test_a_retired_type_still_renders_where_it_shipped(tmp_path):
+    # `doc` is no longer accepted from authors but shipped in past releases.
+    d = _release(tmp_path, "latest", "0.1.0")
+    (d / "2.json").write_text(json.dumps(
+        {"pr": 2, "type": "doc", "summary": "Document the mutex", "url": "u", "notes": ""}))
+    text = _render(tmp_path)
+    assert "### Docs" in text and "Document the mutex" in text
+
+
+def test_render_refuses_to_drop_a_released_entry(tmp_path):
+    d = _release(tmp_path, "latest", "0.1.0")
+    (d / "2.json").write_text(json.dumps(
+        {"pr": 2, "type": "bogus", "summary": "s", "url": "u", "notes": ""}))
+    assert cl.main(["render", "--changes-dir", _changes(tmp_path),
+                    "--changelog", str(tmp_path / "CHANGELOG.md")]) == 2
+
+
+def test_rollup_refuses_to_drop_a_released_entry(tmp_path):
+    d = _release(tmp_path, "latest", "0.1.0")
+    (d / "2.json").write_text(json.dumps(
+        {"pr": 2, "type": "bogus", "summary": "s", "url": "u", "notes": ""}))
+    assert _rollup(tmp_path, "0.2.0", "2026-01-01") == 2
+
+
+def test_an_author_may_not_write_a_retired_type(tmp_path):
+    _changes(tmp_path)
+    p = tmp_path / ".changes" / "preview" / "3.json"
+    p.write_text(json.dumps(
+        {"pr": 3, "type": "doc", "summary": "s", "url": "u", "notes": ""}))
+    assert cl.main(["check", "--pr", "3", "--title", "doc: x",
+                    "--changes-dir", _changes(tmp_path)]) == 1
+
+
 def _release(tmp_path, line, version, meta=True, frag=True):
     d = tmp_path / ".changes" / line / version
     d.mkdir(parents=True, exist_ok=True)

@@ -22,6 +22,17 @@ VALID_TYPES = {"feat", "fix", "chore", "revert"}
 # requiring a fragment for one would force authors to write invisible text.
 CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
 
+# Types no longer accepted from authors but present in already-released
+# directories. Released notes are immutable, so they must still render.
+RETIRED_CATEGORY = {"doc": "Docs"}
+
+# Rendering order: a retired type keeps the position it shipped in.
+RENDER_CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
+                   "revert": "Reverts"}
+
+# chore is released but deliberately renders nowhere, so it is not a loss.
+HIDDEN_ON_RELEASE = {"chore"}
+
 TITLE_RE = re.compile(
     r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
 )
@@ -59,7 +70,7 @@ def validate_fragment(path):
         return [f"{path}: invalid JSON: {e}"]
     for k in sorted(REQUIRED_FRAGMENT - set(data)):
         errs.append(f"{path}: missing field: {k}")
-    if data.get("type") not in VALID_TYPES:
+    if data.get("type") not in VALID_TYPES | set(RETIRED_CATEGORY):
         errs.append(f"{path}: type must be one of {sorted(VALID_TYPES)}")
     s = data.get("summary")
     if not isinstance(s, str) or not s.strip():
@@ -126,7 +137,7 @@ def render_entry(frag):
 def render_grouped(fragments):
     """Render visible fragments as `### Category` sections, or '' if none are."""
     lines = []
-    for typ, cat in CATEGORY.items():
+    for typ, cat in RENDER_CATEGORY.items():
         entries = sorted((f for f in fragments if f["type"] == typ),
                          key=lambda f: f["pr"])
         if not entries:
@@ -203,6 +214,31 @@ def _release_sections(release_dirs):
         if meta is not None:
             out += [render_release_section(meta, frags).rstrip(), ""]
     return out
+
+
+def audit_released(changes_dir):
+    """Errors for released fragments that would render nowhere.
+
+    A WARN here means a published entry disappears from the regenerated file,
+    so every caller that writes a changelog must stop instead.
+    """
+    errs = []
+    changes_dir = Path(changes_dir)
+    released = [changes_dir / "latest", *_frozen_lines(changes_dir)]
+    for line in released:
+        for rel in list_releases_in(line):
+            for f in sorted(rel.glob("*.json")):
+                if f.name == "_meta.json":
+                    continue
+                errs.extend(validate_fragment(f))
+                try:
+                    typ = json.loads(f.read_text()).get("type")
+                except (OSError, ValueError):
+                    continue
+                if typ not in RENDER_CATEGORY and typ not in HIDDEN_ON_RELEASE:
+                    errs.append(f"{f}: type {typ!r} renders nowhere; a released "
+                                f"entry would be lost")
+    return errs
 
 
 def render_root_changelog(changes_dir):
@@ -502,6 +538,10 @@ def _open_release_dir(changes, latest, new_version, date, highlights):
 
 
 def cmd_render(args):
+    if errs := audit_released(args.changes_dir):
+        for e in errs:
+            _err(e)
+        return 2
     text = render_root_changelog(args.changes_dir)
     Path(args.changelog).write_text(text)
     print(f"rendered \u2192 {args.changelog}")
@@ -513,6 +553,11 @@ def cmd_rollup(args):
     changes = Path(args.changes_dir)
     latest = changes / "latest"
     latest.mkdir(parents=True, exist_ok=True)
+
+    if errs := audit_released(changes):
+        for e in errs:
+            _err(e)
+        return 2
 
     # A crash mid-freeze can leave a frozen line with no snapshot. It is a pure
     # function of that line's fragments, so write it rather than refusing.
