@@ -1,7 +1,0 @@
-{
-  "pr": 17,
-  "type": "fix",
-  "summary": "Handle EINTR in pipe read loop.",
-  "url": "https://github.com/azkrishpy/aws-c-common/pull/17",
-  "notes": ""
-}

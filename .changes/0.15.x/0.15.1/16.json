@@ -1,7 +1,0 @@
-{
-  "pr": 16,
-  "type": "chore",
-  "summary": "Bump minimum CMake to 3.16.",
-  "url": "https://github.com/azkrishpy/aws-c-common/pull/16",
-  "notes": ""
-}

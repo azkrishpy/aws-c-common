@@ -15,6 +15,15 @@ top-level [`CHANGELOG.md`](../CHANGELOG.md) is derived from these.
 └── …
 ```
 
+A line frozen before this rule took effect still carries its fragments. Confirm
+its snapshot is complete, then drop them once:
+
+```sh
+python3 -c "import sys;sys.path.insert(0,'.github/scripts');import changelog as c;\
+  assert c.render_frozen_line('.changes/0.15.x') == open('.changes/0.15.x/CHANGELOG.md').read()"
+git rm -r .changes/0.15.x/0.15.*
+```
+
 Freezing a minor line deletes its fragments and keeps only the snapshot.
 Nothing reads a frozen fragment — every release guard works off directory names,
 and a snapshot is never regenerated. Keeping them would add one checked-out file
