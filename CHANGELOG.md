@@ -1,5 +1,10 @@
 # Changelog
 
+## [Preview]
+
+### Features
+- Add a thing. (#24)
+
 ## [0.16.1] — 2026-08-31
 Highlights: Socket options compatibility shim.
 
@@ -14,3 +19,7 @@ Highlights: New socket options layout.
 
 ### Features
 - Replace aws_socket_options struct layout. (#20)
+
+## Earlier releases
+
+- [0.15.x](.changes/0.15.x/CHANGELOG.md)

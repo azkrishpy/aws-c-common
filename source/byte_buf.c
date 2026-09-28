@@ -381,6 +381,14 @@ bool aws_byte_cursor_eq_ignore_case(const struct aws_byte_cursor *a, const struc
     return rv;
 }
 
+bool aws_byte_cursor_eq_cb(const void *a, const void *b) {
+    return aws_byte_cursor_eq(a, b);
+}
+
+bool aws_byte_cursor_eq_ignore_case_cb(const void *a, const void *b) {
+    return aws_byte_cursor_eq_ignore_case(a, b);
+}
+
 /* Every possible uint8_t value, lowercased */
 static const uint8_t s_tolower_table[] = {
     0,   1,   2,   3,   4,   5,   6,   7,   8,   9,   10,  11,  12,  13,  14,  15,  16,  17,  18,  19,  20,  21,
@@ -758,6 +766,21 @@ static int s_aws_byte_buf_append_dynamic(
 
 int aws_byte_buf_append_dynamic(struct aws_byte_buf *to, const struct aws_byte_cursor *from) {
     return s_aws_byte_buf_append_dynamic(to, from, false);
+}
+
+int aws_byte_buf_append_auto(struct aws_byte_buf *to, const struct aws_byte_cursor *from) {
+    AWS_PRECONDITION(aws_byte_buf_is_valid(to));
+    AWS_PRECONDITION(aws_byte_cursor_is_valid(from));
+
+    /*
+     * Buffers without an allocator are externally-owned (e.g. by a
+     * buffer pool); they cannot grow, so use the static append path.
+     * Buffers with an allocator can grow, so use the dynamic path.
+     */
+    if (to->allocator != NULL) {
+        return aws_byte_buf_append_dynamic(to, from);
+    }
+    return aws_byte_buf_append(to, from);
 }
 
 int aws_byte_buf_append_dynamic_secure(struct aws_byte_buf *to, const struct aws_byte_cursor *from) {

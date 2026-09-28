@@ -58,7 +58,17 @@ function(aws_set_common_properties target)
             set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}" PARENT_SCOPE)
         endif()
 
-        list(APPEND AWS_C_FLAGS /W4 /MP)
+        list(APPEND AWS_C_FLAGS /W4)
+
+        # clang-cl targets the MSVC ABI, so CMake reports MSVC, but it is clang
+        # underneath: it ignores some MSVC-only flags and honors clang's warnings.
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            set(AWS_COMPILER_IS_CLANG_CL ON)
+        else()
+            # /MP (parallel compilation) is unimplemented in clang-cl, which warns
+            # once per translation unit that the argument went unused.
+            list(APPEND AWS_C_FLAGS /MP)
+        endif()
 
         if(AWS_WARNINGS_ARE_ERRORS)
             list(APPEND AWS_C_FLAGS /WX)
@@ -81,13 +91,28 @@ function(aws_set_common_properties target)
             list(APPEND AWS_C_FLAGS /DAWS_SUPPORT_WIN7=1)
         endif()
 
-        # Set MSVC runtime libary.
+        # Set MSVC runtime library.
         # Note: there are other ways of doing this if we bump our CMake minimum to 3.14+
         # See: https://cmake.org/cmake/help/latest/policy/CMP0091.html
         if (AWS_STATIC_MSVC_RUNTIME_LIBRARY OR STATIC_CRT)
             list(APPEND AWS_C_FLAGS "/MT$<$<CONFIG:Debug>:d>")
         else()
             list(APPEND AWS_C_FLAGS "/MD$<$<CONFIG:Debug>:d>")
+        endif()
+
+        # Warning disables always go last, since clang takes the last flag that
+        # mentions a diagnostic. clang-cl maps /W4 to -Wall -Wextra, so it turns on
+        # clang warnings that real MSVC does not have, and that the /wdNNNN
+        # suppressions in our Windows sources cannot turn off.
+        if (AWS_COMPILER_IS_CLANG_CL)
+            # NO_WEXTRA has no effect above, because /W4 implies -Wextra.
+            if (SET_PROPERTIES_NO_WEXTRA)
+                list(APPEND AWS_C_FLAGS -Wno-unused-parameter -Wno-unused-variable -Wno-unused-local-typedef)
+            endif()
+            # Windows sources log DWORD/NTSTATUS with %u and %d, and compare
+            # against DWORD/NTSTATUS/AWS_ARRAY_SIZE. Same width on Windows, so
+            # these are type-name mismatches rather than real defects.
+            list(APPEND AWS_C_FLAGS -Wno-format -Wno-sign-compare)
         endif()
 
     else()
@@ -257,7 +282,7 @@ function(aws_set_common_properties target)
     # We do this so that backtraces are more likely to show function names.
     # We mostly use backtraces to diagnose memory leaks.
     if (NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
-        # And dont hide symbols on anything pre GCC 5.0 (Visibility support was not great on older compilers and some libraries didnt annotate visibility - 
+        # And don't hide symbols on anything pre GCC 5.0 (Visibility support was not great on older compilers and some libraries didn't annotate visibility - 
         # looking at you jni, which does not annotate on gcc less than 4.2. Mixing no annotation and hidden symbols leads to unexpected failures.). 
         if (NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS "5.0"))
             set_target_properties(${target} PROPERTIES C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)

@@ -4,14 +4,14 @@
  */
 
 #include <aws/common/allocator.h>
+#include <aws/common/clock.h>
 #include <aws/common/device_random.h>
 #include <aws/common/file.h>
 #include <aws/common/string.h>
 #include <aws/common/system_info.h>
+#include <aws/common/thread.h>
 
 #include <aws/testing/aws_test_harness.h>
-
-#include <fcntl.h>
 
 static int s_aws_fopen_test_helper(char *file_path, char *content) {
     char read_result[100];
@@ -601,7 +601,7 @@ static void s_file_path_read_from_offset_tester_cleanup(struct aws_file_path_rea
 static int s_test_file_path_read_from_offset_direct_io(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-#if defined(__linux__)
+#if defined(AWS_OS_LINUX)
     struct aws_file_path_read_from_offset_tester tester;
     char file_path[] = "test_file_path_read_from_offset_direct_io.txt";
 
@@ -805,7 +805,7 @@ AWS_TEST_CASE(test_file_path_read_from_offset, s_test_file_path_read_from_offset
 static int s_test_file_path_read_from_offset_direct_io_chunking(struct aws_allocator *allocator, void *ctx) {
     (void)ctx;
 
-#if defined(__linux__)
+#if defined(AWS_OS_LINUX)
     struct aws_file_path_read_from_offset_tester tester;
     char file_path[] = "test_direct_io_chunking.txt";
     /* Instead of creating a 2GiB file to test, we use the separate API that allows us to pass in the chunk size. */
@@ -895,3 +895,497 @@ static int s_test_file_path_read_from_offset_direct_io_chunking(struct aws_alloc
 }
 
 AWS_TEST_CASE(test_file_path_read_from_offset_direct_io_chunking, s_test_file_path_read_from_offset_direct_io_chunking)
+
+static int s_test_file_path_write_to_offset_direct_io(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+#if defined(AWS_OS_LINUX)
+    size_t page_size = aws_system_info_page_size();
+    struct aws_allocator *aligned_alloc = aws_explicit_aligned_allocator_new(page_size);
+    ASSERT_NOT_NULL(aligned_alloc);
+
+    char file_path_cstr[] = "test_file_path_write_to_offset_direct_io.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    /* Create the file first (function requires it to exist) */
+    FILE *f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    /* Test 1: Write 2 aligned pages of 'A' at offset 0 */
+    size_t two_pages = page_size * 2;
+    struct aws_byte_buf write_buf;
+    ASSERT_SUCCESS(aws_byte_buf_init(&write_buf, aligned_alloc, two_pages));
+    memset(write_buf.buffer, 'A', two_pages);
+    write_buf.len = two_pages;
+    struct aws_byte_cursor write_cursor = aws_byte_cursor_from_buf(&write_buf);
+    ASSERT_SUCCESS(aws_file_path_write_to_offset_direct_io(file_path, 0, write_cursor));
+
+    /* Read back and verify */
+    struct aws_byte_buf read_buf;
+    ASSERT_SUCCESS(aws_byte_buf_init(&read_buf, aligned_alloc, two_pages));
+    size_t actual_read = 0;
+    ASSERT_SUCCESS(aws_file_path_read_from_offset_direct_io(file_path, 0, two_pages, &read_buf, &actual_read));
+    ASSERT_UINT_EQUALS(two_pages, actual_read);
+    for (size_t i = 0; i < two_pages; i++) {
+        ASSERT_UINT_EQUALS('A', read_buf.buffer[i]);
+    }
+    aws_byte_buf_clean_up(&read_buf);
+
+    /* Test 2: Write 1 page of 'C' at page-aligned offset (second page) */
+    struct aws_byte_buf overwrite_buf;
+    ASSERT_SUCCESS(aws_byte_buf_init(&overwrite_buf, aligned_alloc, page_size));
+    memset(overwrite_buf.buffer, 'C', page_size);
+    overwrite_buf.len = page_size;
+    struct aws_byte_cursor overwrite_cursor = aws_byte_cursor_from_buf(&overwrite_buf);
+    ASSERT_SUCCESS(aws_file_path_write_to_offset_direct_io(file_path, (uint64_t)page_size, overwrite_cursor));
+
+    /* Read back and verify first page still 'A', second page now 'C' */
+    ASSERT_SUCCESS(aws_byte_buf_init(&read_buf, aligned_alloc, two_pages));
+    actual_read = 0;
+    ASSERT_SUCCESS(aws_file_path_read_from_offset_direct_io(file_path, 0, two_pages, &read_buf, &actual_read));
+    ASSERT_UINT_EQUALS(two_pages, actual_read);
+    for (size_t i = 0; i < page_size; i++) {
+        ASSERT_UINT_EQUALS('A', read_buf.buffer[i]);
+    }
+    for (size_t i = page_size; i < two_pages; i++) {
+        ASSERT_UINT_EQUALS('C', read_buf.buffer[i]);
+    }
+    aws_byte_buf_clean_up(&read_buf);
+    aws_byte_buf_clean_up(&overwrite_buf);
+
+    /* Test 3: Unaligned MUST fail */
+    struct aws_byte_buf unaligned_buf;
+    size_t unaligned_len = page_size + 37;
+    ASSERT_SUCCESS(aws_byte_buf_init(&unaligned_buf, aligned_alloc, unaligned_len));
+    memset(unaligned_buf.buffer, 'X', unaligned_len);
+    unaligned_buf.len = unaligned_len;
+    struct aws_byte_cursor unaligned_cursor = aws_byte_cursor_from_buf(&unaligned_buf);
+    ASSERT_FAILS(aws_file_path_write_to_offset_direct_io(file_path, 37, unaligned_cursor));
+    ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
+    aws_byte_buf_clean_up(&unaligned_buf);
+
+    /* Test 4: File does not exist MUST fail */
+    struct aws_string *nonexistent = aws_string_new_from_c_str(allocator, "nonexistent_direct_io_file.txt");
+    struct aws_byte_cursor one_page_cursor = {.ptr = write_buf.buffer, .len = page_size};
+    ASSERT_FAILS(aws_file_path_write_to_offset_direct_io(nonexistent, 0, one_page_cursor));
+    aws_string_destroy(nonexistent);
+
+    /* Test 5: Mixed O_DIRECT + buffered writes at non-overlapping offsets, verify all data correct.
+     * Simulates the download pattern: O_DIRECT for aligned parts, buffered write for last part tail. */
+    remove(file_path_cstr);
+    f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    /* Write 3 pages with O_DIRECT: page 0='D', page 1='E', page 2='F' */
+    memset(write_buf.buffer, 'D', page_size);
+    write_cursor = (struct aws_byte_cursor){.ptr = write_buf.buffer, .len = page_size};
+    ASSERT_SUCCESS(aws_file_path_write_to_offset_direct_io(file_path, 0, write_cursor));
+
+    memset(write_buf.buffer, 'E', page_size);
+    ASSERT_SUCCESS(aws_file_path_write_to_offset_direct_io(file_path, (uint64_t)page_size, write_cursor));
+
+    memset(write_buf.buffer, 'F', page_size);
+    ASSERT_SUCCESS(aws_file_path_write_to_offset_direct_io(file_path, (uint64_t)(page_size * 2), write_cursor));
+
+    /* Write unaligned tail (37 bytes of 'G') at offset page_size*3 using buffered write */
+    size_t tail_len = 37;
+    uint8_t tail_data[37];
+    memset(tail_data, 'G', tail_len);
+    FILE *tail_file = aws_fopen(file_path_cstr, "r+b");
+    ASSERT_NOT_NULL(tail_file);
+    ASSERT_TRUE(fseek(tail_file, (long)(page_size * 3), SEEK_SET) == 0);
+    size_t written = fwrite(tail_data, 1, tail_len, tail_file);
+    ASSERT_INT_EQUALS((int)tail_len, (int)written);
+    fclose(tail_file);
+
+    /* Read entire file back and verify all regions */
+    size_t total_size = page_size * 3 + tail_len;
+    FILE *verify_file = aws_fopen(file_path_cstr, "rb");
+    ASSERT_NOT_NULL(verify_file);
+    uint8_t *verify_buf = aws_mem_calloc(allocator, 1, total_size);
+    ASSERT_UINT_EQUALS(total_size, fread(verify_buf, 1, total_size, verify_file));
+    fclose(verify_file);
+
+    for (size_t i = 0; i < page_size; i++) {
+        ASSERT_UINT_EQUALS('D', verify_buf[i]);
+    }
+    for (size_t i = page_size; i < page_size * 2; i++) {
+        ASSERT_UINT_EQUALS('E', verify_buf[i]);
+    }
+    for (size_t i = page_size * 2; i < page_size * 3; i++) {
+        ASSERT_UINT_EQUALS('F', verify_buf[i]);
+    }
+    for (size_t i = page_size * 3; i < total_size; i++) {
+        ASSERT_UINT_EQUALS('G', verify_buf[i]);
+    }
+    aws_mem_release(allocator, verify_buf);
+
+    /* Cleanup */
+    aws_byte_buf_clean_up(&write_buf);
+    remove(file_path_cstr);
+    aws_string_destroy(file_path);
+    aws_explicit_aligned_allocator_destroy(aligned_alloc);
+#else
+    (void)allocator;
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, "dummy.txt");
+    struct aws_byte_cursor empty = {.ptr = NULL, .len = 0};
+    ASSERT_FAILS(aws_file_path_write_to_offset_direct_io(file_path, 0, empty));
+    ASSERT_UINT_EQUALS(AWS_ERROR_UNSUPPORTED_OPERATION, aws_last_error());
+    aws_string_destroy(file_path);
+#endif
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_path_write_to_offset_direct_io, s_test_file_path_write_to_offset_direct_io)
+
+static int s_test_file_get_last_modified_epoch_fn(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    const char *file_path_cstr = "last_modified_test.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    /* Create a file and write something */
+    FILE *file = aws_fopen(file_path_cstr, "w");
+    ASSERT_NOT_NULL(file);
+    fprintf(file, "hello");
+    fclose(file); /* must close the write handle: on Windows the last write time is only
+                     guaranteed correct once all writing handles are closed (see doc comment
+                     on aws_file_get_last_modified_epoch) */
+
+    /* Get last modified time on a fresh handle */
+    file = aws_fopen(file_path_cstr, "r");
+    ASSERT_NOT_NULL(file);
+
+    uint64_t first_modified_ns = 0;
+    ASSERT_SUCCESS(aws_file_get_last_modified_epoch(file, &first_modified_ns));
+    fclose(file);
+
+    /* Verify it's less than current time */
+    uint64_t now_ns = 0;
+    ASSERT_SUCCESS(aws_sys_clock_get_ticks(&now_ns));
+    ASSERT_TRUE(first_modified_ns <= now_ns);
+    ASSERT_TRUE(first_modified_ns > 0);
+
+    /* Sleep to ensure filesystem timestamp advances */
+    aws_thread_current_sleep((uint64_t)1000000000); /* 1 second */
+
+    /* Modify the file */
+    file = aws_fopen(file_path_cstr, "w");
+    ASSERT_NOT_NULL(file);
+    fprintf(file, "world");
+    fclose(file); /* close write handle before re-querying, same reason as above */
+
+    /* Get last modified time again on a fresh handle */
+    file = aws_fopen(file_path_cstr, "r");
+    ASSERT_NOT_NULL(file);
+
+    uint64_t second_modified_ns = 0;
+    ASSERT_SUCCESS(aws_file_get_last_modified_epoch(file, &second_modified_ns));
+    fclose(file);
+
+    /* Second modification time must be strictly later than first */
+    ASSERT_TRUE(second_modified_ns > first_modified_ns);
+    ASSERT_TRUE(second_modified_ns > now_ns);
+
+    /* Cleanup */
+    remove(file_path_cstr);
+    aws_string_destroy(file_path);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_get_last_modified_epoch, s_test_file_get_last_modified_epoch_fn)
+
+/* Positional writes through a plain descriptor: unaligned offsets and lengths, and writes issued
+ * out of order, all have to land exactly where they were addressed. This is what the direct-io
+ * variant cannot do, and what lets a caller write disjoint ranges of one file in any order. */
+static int s_test_file_write_to_offset_fn(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    char file_path_cstr[] = "test_file_write_to_offset.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    /* The function requires the file to exist; the caller creates it. */
+    FILE *f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    int fd = AWS_FILE_INVALID_FD;
+    ASSERT_SUCCESS(aws_file_open_for_write(file_path, &fd));
+    ASSERT_TRUE(fd != AWS_FILE_INVALID_FD);
+
+    /* Deliberately unaligned lengths, written back-to-front so a descriptor that leaned on its own
+     * file position would interleave them wrongly. */
+    struct aws_byte_cursor third = aws_byte_cursor_from_c_str("ccc");
+    struct aws_byte_cursor second = aws_byte_cursor_from_c_str("bbbbbbb");
+    struct aws_byte_cursor first = aws_byte_cursor_from_c_str("aaaaa");
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 12, third));
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 5, second));
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 0, first));
+
+    /* A zero-length write is a no-op, not an error. */
+    struct aws_byte_cursor empty = {.ptr = NULL, .len = 0};
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 0, empty));
+
+    aws_file_close_fd(fd);
+
+    char expected[] = "aaaaabbbbbbbccc";
+    size_t expected_len = sizeof(expected) - 1;
+    char read_result[64];
+    AWS_ZERO_ARRAY(read_result);
+    FILE *readfile = aws_fopen(file_path_cstr, "rb");
+    ASSERT_NOT_NULL(readfile);
+    size_t read_len = fread(read_result, sizeof(char), expected_len, readfile);
+    fclose(readfile);
+    ASSERT_UINT_EQUALS(expected_len, read_len);
+    ASSERT_BIN_ARRAYS_EQUALS(expected, expected_len, read_result, read_len);
+
+    /* An invalid descriptor is rejected rather than writing somewhere unintended. */
+    ASSERT_FAILS(aws_file_write_to_offset(AWS_FILE_INVALID_FD, 0, first));
+    ASSERT_UINT_EQUALS(AWS_ERROR_INVALID_ARGUMENT, aws_last_error());
+    aws_reset_error();
+
+    /* Closing "no descriptor" is a no-op. */
+    aws_file_close_fd(AWS_FILE_INVALID_FD);
+
+    ASSERT_SUCCESS(aws_file_delete(file_path));
+    aws_string_destroy(file_path);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_write_to_offset, s_test_file_write_to_offset_fn)
+
+/* The descriptor APIs take the path as an aws_string so it can be converted correctly on platforms
+ * whose filesystem calls are not byte-oriented; on Windows that means MultiByteToWideChar(CP_UTF8).
+ * The assertion that matters is the last one: a file created and written through the descriptor API is
+ * found under the same name by the stdio API, so callers can mix the two on one path. */
+static int s_test_file_write_to_offset_non_ascii_fn(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    char file_path_cstr[] = "Éxample_write_to_offset.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    /* The function requires the file to exist; the caller creates it. */
+    FILE *f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    int fd = AWS_FILE_INVALID_FD;
+    ASSERT_SUCCESS(aws_file_open_for_write(file_path, &fd));
+    ASSERT_TRUE(fd != AWS_FILE_INVALID_FD);
+
+    struct aws_byte_cursor second = aws_byte_cursor_from_c_str("world");
+    struct aws_byte_cursor first = aws_byte_cursor_from_c_str("hello");
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 5, second));
+    ASSERT_SUCCESS(aws_file_write_to_offset(fd, 0, first));
+
+    aws_file_close_fd(fd);
+
+    /* Read back through the stdio wrapper, which converts the same path independently. Agreement here
+     * is what proves both APIs resolved one identical file rather than two differently-encoded names. */
+    char expected[] = "helloworld";
+    size_t expected_len = sizeof(expected) - 1;
+    char read_result[64];
+    AWS_ZERO_ARRAY(read_result);
+    FILE *readfile = aws_fopen(file_path_cstr, "rb");
+    ASSERT_NOT_NULL(readfile);
+    size_t read_len = fread(read_result, sizeof(char), expected_len, readfile);
+    fclose(readfile);
+    ASSERT_UINT_EQUALS(expected_len, read_len);
+    ASSERT_BIN_ARRAYS_EQUALS(expected, expected_len, read_result, read_len);
+
+    ASSERT_SUCCESS(aws_file_delete(file_path));
+    ASSERT_FALSE(aws_path_exists(file_path));
+    aws_string_destroy(file_path);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_write_to_offset_non_ascii, s_test_file_write_to_offset_non_ascii_fn)
+
+#define S_PARALLEL_WRITE_THREADS 8
+#define S_PARALLEL_WRITE_CHUNK 4096
+/* Size of each individual write in the shared-descriptor test. */
+#define S_SHARED_FD_PIECE 64
+
+struct s_parallel_write_ctx {
+    struct aws_string *file_path;
+    /* Used only by the shared-descriptor test; the per-worker test opens its own. */
+    int shared_fd;
+    /* Which chunk of the file this thread owns. */
+    size_t chunk_index;
+    /* Set to the byte this thread filled its chunk with, so the checker knows what to expect. */
+    uint8_t fill;
+    int result;
+};
+
+/* Each thread opens its OWN descriptor, mirroring the per-worker descriptor slots the S3 write
+ * workers hold, and writes only its own disjoint range. */
+static void s_parallel_write_thread_fn(void *arg) {
+    struct s_parallel_write_ctx *thread_ctx = arg;
+    thread_ctx->result = AWS_OP_ERR;
+
+    int fd = AWS_FILE_INVALID_FD;
+    if (aws_file_open_for_write(thread_ctx->file_path, &fd)) {
+        return;
+    }
+
+    uint8_t chunk[S_PARALLEL_WRITE_CHUNK];
+    memset(chunk, thread_ctx->fill, sizeof(chunk));
+    struct aws_byte_cursor cursor = aws_byte_cursor_from_array(chunk, sizeof(chunk));
+
+    thread_ctx->result =
+        aws_file_write_to_offset(fd, (uint64_t)thread_ctx->chunk_index * S_PARALLEL_WRITE_CHUNK, cursor);
+
+    aws_file_close_fd(fd);
+}
+
+/* Several threads writing disjoint ranges of one file concurrently, each through its own
+ * descriptor, must produce exactly the same file as writing the ranges one at a time. */
+static int s_test_file_write_to_offset_parallel_fn(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    char file_path_cstr[] = "test_file_write_to_offset_parallel.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    FILE *f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    struct aws_thread threads[S_PARALLEL_WRITE_THREADS];
+    struct s_parallel_write_ctx contexts[S_PARALLEL_WRITE_THREADS];
+
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        contexts[i].file_path = file_path;
+        /* Reverse the offset order against thread launch order, so a correct result cannot come
+         * from the threads happening to run in offset order. */
+        contexts[i].chunk_index = S_PARALLEL_WRITE_THREADS - 1 - i;
+        contexts[i].fill = (uint8_t)('A' + contexts[i].chunk_index);
+        contexts[i].result = AWS_OP_ERR;
+        ASSERT_SUCCESS(aws_thread_init(&threads[i], allocator));
+        ASSERT_SUCCESS(aws_thread_launch(&threads[i], s_parallel_write_thread_fn, &contexts[i], NULL));
+    }
+
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        ASSERT_SUCCESS(aws_thread_join(&threads[i]));
+        aws_thread_clean_up(&threads[i]);
+    }
+
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        ASSERT_SUCCESS(contexts[i].result);
+    }
+
+    /* Every chunk holds its own thread's fill byte, and the file is exactly the chunks. */
+    size_t total = (size_t)S_PARALLEL_WRITE_THREADS * S_PARALLEL_WRITE_CHUNK;
+    struct aws_byte_buf read_buf;
+    ASSERT_SUCCESS(aws_byte_buf_init(&read_buf, allocator, total + 1));
+    FILE *readfile = aws_fopen(file_path_cstr, "rb");
+    ASSERT_NOT_NULL(readfile);
+    size_t read_len = fread(read_buf.buffer, sizeof(uint8_t), total + 1, readfile);
+    fclose(readfile);
+    ASSERT_UINT_EQUALS(total, read_len);
+
+    for (size_t chunk = 0; chunk < S_PARALLEL_WRITE_THREADS; ++chunk) {
+        uint8_t expected_fill = (uint8_t)('A' + chunk);
+        for (size_t byte = 0; byte < S_PARALLEL_WRITE_CHUNK; ++byte) {
+            ASSERT_UINT_EQUALS(expected_fill, read_buf.buffer[chunk * S_PARALLEL_WRITE_CHUNK + byte]);
+        }
+    }
+
+    aws_byte_buf_clean_up(&read_buf);
+    ASSERT_SUCCESS(aws_file_delete(file_path));
+    aws_string_destroy(file_path);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_write_to_offset_parallel, s_test_file_write_to_offset_parallel_fn)
+
+/* Same disjoint-range writes as above, but every thread shares ONE descriptor. This is what a
+ * positional write buys over seek-then-write: the offset rides on the call, so the threads cannot
+ * disturb each other's landing place. */
+static void s_shared_fd_write_thread_fn(void *arg) {
+    struct s_parallel_write_ctx *thread_ctx = arg;
+
+    /* Fill the chunk with many small writes rather than one big one. Each call is an independent
+     * chance for a position-dependent implementation to be caught interleaving, so this turns a
+     * rare race into a reliable failure. */
+    uint8_t piece[S_SHARED_FD_PIECE];
+    memset(piece, thread_ctx->fill, sizeof(piece));
+    struct aws_byte_cursor cursor = aws_byte_cursor_from_array(piece, sizeof(piece));
+    uint64_t chunk_start = (uint64_t)thread_ctx->chunk_index * S_PARALLEL_WRITE_CHUNK;
+
+    thread_ctx->result = AWS_OP_SUCCESS;
+    for (size_t written = 0; written < S_PARALLEL_WRITE_CHUNK; written += S_SHARED_FD_PIECE) {
+        /* thread_ctx->shared_fd is written once before any thread launches. */
+        if (aws_file_write_to_offset(thread_ctx->shared_fd, chunk_start + written, cursor)) {
+            thread_ctx->result = AWS_OP_ERR;
+            return;
+        }
+    }
+}
+
+static int s_test_file_write_to_offset_shared_fd_fn(struct aws_allocator *allocator, void *ctx) {
+    (void)ctx;
+
+    char file_path_cstr[] = "test_file_write_to_offset_shared_fd.txt";
+    struct aws_string *file_path = aws_string_new_from_c_str(allocator, file_path_cstr);
+
+    FILE *f = aws_fopen(file_path_cstr, "wb");
+    ASSERT_NOT_NULL(f);
+    fclose(f);
+
+    int shared_fd = AWS_FILE_INVALID_FD;
+    ASSERT_SUCCESS(aws_file_open_for_write(file_path, &shared_fd));
+
+    struct aws_thread threads[S_PARALLEL_WRITE_THREADS];
+    struct s_parallel_write_ctx contexts[S_PARALLEL_WRITE_THREADS];
+
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        contexts[i].file_path = file_path;
+        contexts[i].shared_fd = shared_fd;
+        contexts[i].chunk_index = S_PARALLEL_WRITE_THREADS - 1 - i;
+        contexts[i].fill = (uint8_t)('A' + contexts[i].chunk_index);
+        contexts[i].result = AWS_OP_ERR;
+        ASSERT_SUCCESS(aws_thread_init(&threads[i], allocator));
+        ASSERT_SUCCESS(aws_thread_launch(&threads[i], s_shared_fd_write_thread_fn, &contexts[i], NULL));
+    }
+
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        ASSERT_SUCCESS(aws_thread_join(&threads[i]));
+        aws_thread_clean_up(&threads[i]);
+    }
+    for (size_t i = 0; i < S_PARALLEL_WRITE_THREADS; ++i) {
+        ASSERT_SUCCESS(contexts[i].result);
+    }
+
+    aws_file_close_fd(shared_fd);
+
+    size_t total = (size_t)S_PARALLEL_WRITE_THREADS * S_PARALLEL_WRITE_CHUNK;
+    struct aws_byte_buf read_buf;
+    ASSERT_SUCCESS(aws_byte_buf_init(&read_buf, allocator, total + 1));
+    FILE *readfile = aws_fopen(file_path_cstr, "rb");
+    ASSERT_NOT_NULL(readfile);
+    size_t read_len = fread(read_buf.buffer, sizeof(uint8_t), total + 1, readfile);
+    fclose(readfile);
+    ASSERT_UINT_EQUALS(total, read_len);
+
+    for (size_t chunk = 0; chunk < S_PARALLEL_WRITE_THREADS; ++chunk) {
+        uint8_t expected_fill = (uint8_t)('A' + chunk);
+        for (size_t byte = 0; byte < S_PARALLEL_WRITE_CHUNK; ++byte) {
+            ASSERT_UINT_EQUALS(expected_fill, read_buf.buffer[chunk * S_PARALLEL_WRITE_CHUNK + byte]);
+        }
+    }
+
+    aws_byte_buf_clean_up(&read_buf);
+    ASSERT_SUCCESS(aws_file_delete(file_path));
+    aws_string_destroy(file_path);
+
+    return AWS_OP_SUCCESS;
+}
+
+AWS_TEST_CASE(test_file_write_to_offset_shared_fd, s_test_file_write_to_offset_shared_fd_fn)
