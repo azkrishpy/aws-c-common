@@ -75,7 +75,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Every check outcome, against a scratch tree
         run: |
-          set -uo pipefail
+          # Not -e: these scenarios expect non-zero exits and tally them.
+          set -uo pipefail +e
           WORK="$(mktemp -d)"
           mkdir -p "${WORK}/.changes/preview"
           pass=0; fail=0
@@ -128,7 +129,8 @@ jobs:
           echo
           echo "check scenarios: ${pass} passed, ${fail} failed"
           echo "check scenarios: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          [[ "$fail" -eq 0 ]]
+          [[ "$fail" -eq 0 ]] || exit 1
+          exit 0
 
   changed-paths:
     runs-on: ubuntu-24.04
@@ -136,7 +138,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: The .changes/ integrity rules
         run: |
-          set -uo pipefail
+          # Not -e: these scenarios expect non-zero exits and tally them.
+          set -uo pipefail +e
           WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
           pass=0; fail=0
           printf '{"pr":30,"type":"feat","summary":"Mine","url":"u","notes":""}\n' \
@@ -175,7 +178,8 @@ jobs:
           echo
           echo "changed-paths: ${pass} passed, ${fail} failed"
           echo "changed-paths: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          [[ "$fail" -eq 0 ]]
+          [[ "$fail" -eq 0 ]] || exit 1
+          exit 0
 
   released-fragment-audit:
     runs-on: ubuntu-24.04
