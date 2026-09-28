@@ -206,8 +206,9 @@ def test_rollup_minor_freezes_previous_line(tmp_path):
     changes = tmp_path / ".changes"
     assert (changes / "latest" / "0.30.0").is_dir()
     assert not (changes / "latest" / "0.29.0").exists()
-    assert (changes / "0.29.x" / "0.29.0").is_dir()
-    assert (changes / "0.29.x" / "0.29.1").is_dir()
+    # Pruned at freeze: the snapshot is the archive, git keeps the fragments.
+    assert not (changes / "0.29.x" / "0.29.0").exists()
+    assert sorted(p.name for p in (changes / "0.29.x").iterdir()) == ["CHANGELOG.md"]
     frozen = (changes / "0.29.x" / "CHANGELOG.md").read_text()
     assert "## [Preview]" not in frozen
     assert frozen.startswith("# Changelog — 0.29.x")
@@ -234,7 +235,8 @@ def test_rollup_major_freezes_current_minor_line(tmp_path):
     _seed(tmp_path, 2, "feat: big change")
     _rollup(tmp_path, "1.0.0", "2027-01-01")
     changes = tmp_path / ".changes"
-    assert (changes / "0.29.x" / "0.29.0").is_dir()
+    assert (changes / "0.29.x" / "CHANGELOG.md").exists()
+    assert not (changes / "0.29.x" / "0.29.0").exists()
     assert (changes / "latest" / "1.0.0").is_dir()
 
 
@@ -373,12 +375,12 @@ def _check(tmp_path, pr, title, bot=""):
     return cl.main(args)
 
 
-def test_doc_is_no_longer_a_type(tmp_path):
-    # Neither the title form nor the fragment field accepts it any more.
-    assert cl.parse_title("doc: add a design doc") == (None, "doc: add a design doc")
+def test_doc_is_a_type_and_docs_is_not(tmp_path):
+    # `doc` is documented in .changes/README.md; the plural is not a type.
+    assert cl.parse_title("doc: add a design doc") == ("doc", "add a design doc")
     assert cl.parse_title("docs: add a design doc") == (None, "docs: add a design doc")
     _write(tmp_path, 1, "doc")
-    assert _check(tmp_path, 1, "feat: x") == 1
+    assert _check(tmp_path, 1, "doc: x") == 0
 
 
 def test_chore_needs_no_fragment(tmp_path):
@@ -619,8 +621,7 @@ def test_a_frozen_line_renders_a_degraded_tree(tmp_path):
     assert "## [0.29.0]" in text and "## [0.29.1]" not in text
 
 
-def test_a_retired_type_still_renders_where_it_shipped(tmp_path):
-    # `doc` is no longer accepted from authors but shipped in past releases.
+def test_a_doc_entry_renders_under_docs(tmp_path):
     d = _release(tmp_path, "latest", "0.1.0")
     (d / "2.json").write_text(json.dumps(
         {"pr": 2, "type": "doc", "summary": "Document the mutex", "url": "u", "notes": ""}))
@@ -641,15 +642,6 @@ def test_rollup_refuses_to_drop_a_released_entry(tmp_path):
     (d / "2.json").write_text(json.dumps(
         {"pr": 2, "type": "bogus", "summary": "s", "url": "u", "notes": ""}))
     assert _rollup(tmp_path, "0.2.0", "2026-01-01") == 2
-
-
-def test_an_author_may_not_write_a_retired_type(tmp_path):
-    _changes(tmp_path)
-    p = tmp_path / ".changes" / "preview" / "3.json"
-    p.write_text(json.dumps(
-        {"pr": 3, "type": "doc", "summary": "s", "url": "u", "notes": ""}))
-    assert cl.main(["check", "--pr", "3", "--title", "doc: x",
-                    "--changes-dir", _changes(tmp_path)]) == 1
 
 
 def test_render_subcommand_writes_the_file(tmp_path):

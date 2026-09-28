@@ -17,28 +17,20 @@ import re
 import sys
 from pathlib import Path
 
-VALID_TYPES = {"feat", "fix", "chore", "revert"}
-# chore has no row on purpose: it is internal-only and renders nowhere, so
-# requiring a fragment for one would force authors to write invisible text.
-CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
+VALID_TYPES = {"feat", "fix", "doc", "chore", "revert"}
 
-# Types no longer accepted from authors but present in already-released
-# directories. Released notes are immutable, so they must still render.
-RETIRED_TYPES = {"doc"}
+# Section order for the rendered file. chore has no row on purpose: it is
+# internal-only, so requiring a fragment would force authors to write text no
+# customer ever reads.
+CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
+            "revert": "Reverts"}
 
-# Rendering order: a retired type keeps the position it shipped in.
-RENDER_CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
-                   "revert": "Reverts"}
-
-# chore is released but deliberately renders nowhere, so it is not a loss.
-HIDDEN_ON_RELEASE = {"chore"}
-
-# Every accepted type must either render or be deliberately hidden, or a
-# released entry could pass validation and still vanish from the output.
-assert set(RENDER_CATEGORY) | HIDDEN_ON_RELEASE == VALID_TYPES | RETIRED_TYPES
+# Every accepted type either renders or is chore. Without this, narrowing the
+# type set would silently drop released entries from a regenerated file.
+assert set(CATEGORY) | {"chore"} == VALID_TYPES
 
 TITLE_RE = re.compile(
-    r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
+    r"^(feat|fix|doc|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
 )
 # GitHub's Revert button generates `Revert "<original title> (#<n>)"`, which
 # carries no `<type>:` prefix. Accepting it verbatim means a maintainer using
@@ -74,7 +66,7 @@ def validate_fragment(path):
         return [f"{path}: invalid JSON: {e}"]
     for k in sorted(REQUIRED_FRAGMENT - set(data)):
         errs.append(f"{path}: missing field: {k}")
-    if data.get("type") not in VALID_TYPES | RETIRED_TYPES:
+    if data.get("type") not in VALID_TYPES:
         errs.append(f"{path}: type must be one of {sorted(VALID_TYPES)}")
     s = data.get("summary")
     if not isinstance(s, str) or not s.strip():
@@ -141,7 +133,7 @@ def render_entry(frag):
 def render_grouped(fragments):
     """Render visible fragments as `### Category` sections, or '' if none are."""
     lines = []
-    for typ, cat in RENDER_CATEGORY.items():
+    for typ, cat in CATEGORY.items():
         entries = sorted((f for f in fragments if f["type"] == typ),
                          key=lambda f: f["pr"])
         if not entries:
@@ -228,8 +220,7 @@ def audit_released(changes_dir):
     """
     errs = []
     changes_dir = Path(changes_dir)
-    released = [changes_dir / "latest", *_frozen_lines(changes_dir)]
-    for line in released:
+    for line in [changes_dir / "latest"]:
         for rel in list_releases_in(line):
             for f in sorted(rel.glob("*.json")):
                 if f.name == "_meta.json":
@@ -525,6 +516,13 @@ def _freeze_current_line(changes, latest, current_minor):
         return f"freeze target {frozen_dir} already exists"
     latest.rename(frozen_dir)
     (frozen_dir / "CHANGELOG.md").write_text(render_frozen_line(frozen_dir))
+    # The snapshot is the archive from here on. Keeping the fragments too would
+    # add one file per merged PR forever, for nothing that reads them; `git log
+    # -- .changes` still has every one.
+    for release_dir in list_releases_in(frozen_dir):
+        for f in release_dir.iterdir():
+            f.unlink()
+        release_dir.rmdir()
     latest.mkdir(parents=True, exist_ok=True)
     return None
 

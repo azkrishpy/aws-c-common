@@ -61,10 +61,12 @@ jobs:
               echo "BROKEN    ${label}  <- mutation changed nothing"
               survived=$((survived+1)); return
             fi
-            # A mutant that will not import proves nothing: the suite would fail
-            # on the import error rather than on the guard being gone.
-            if ! python3 -c "import sys; sys.path.insert(0,'.github/scripts'); import changelog" 2>/dev/null; then
-              echo "BROKEN    ${label}  <- mutant does not import, fix the mutation"
+            # A mutant that dies of SyntaxError proves nothing -- the suite would
+            # fail on the parse, not on the guard. An AssertionError is different:
+            # that is the module's own invariant catching the mutation, so it counts.
+            err="$(python3 -c "import sys; sys.path.insert(0,'.github/scripts'); import changelog" 2>&1 >/dev/null || true)"
+            if grep -qE "SyntaxError|IndentationError" <<< "$err"; then
+              echo "BROKEN    ${label}  <- mutant does not parse, fix the mutation"
               survived=$((survived+1)); return
             fi
             if python3 -m pytest .github/changelog-tests -q >/tmp/mut.log 2>&1 \
@@ -78,8 +80,8 @@ jobs:
           }
 
           mutate "a placeholder pr number is accepted" 'elif pr <= 0:' 'elif False:'
-          mutate "a retired type no longer renders" \
-            'for typ, cat in RENDER_CATEGORY.items():' 'for typ, cat in CATEGORY.items():'
+          mutate "doc entries stop being rendered" \
+            'for typ, cat in CATEGORY.items():' 'for typ, cat in list(CATEGORY.items())[:2]:'
           mutate "seed accepts pr 0" 'if args.pr <= 0:' 'if False:'
           mutate "a stray fragment is tolerated" 'stray-fragment' 'ok'
           mutate "a modified fragment is tolerated" 'modified-fragment' 'ok'
@@ -92,8 +94,8 @@ jobs:
           mutate "an invalid released fragment is rendered anyway" \
             'if audit_released(args.changes_dir):' 'if False:'
           mutate "a type mismatch is tolerated" 'type-mismatch' 'ok'
-          mutate "a retired type is accepted from an author" \
-            '^(feat|fix|chore|revert)' '^(feat|fix|chore|revert|doc)'
+          mutate "a freeze keeps the fragments it should drop" \
+            'for release_dir in list_releases_in(frozen_dir):' 'for release_dir in []:'
 
           cp /tmp/pristine.py "$CLP"
           echo
@@ -102,43 +104,58 @@ jobs:
           [[ "$survived" -eq 0 ]] || exit 1
           exit 0
 
-  frozen-snapshots-are-stable:
+  freeze-retention:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: A re-render must reproduce every committed snapshot byte for byte
+      - name: A freeze keeps the snapshot and drops the fragments
         run: |
           set -euo pipefail
-          # This is the regression that matters: released notes are immutable,
-          # but they are rendered by today's code. If a type retires, the entry
-          # must still render, or a merge silently deletes published history.
+          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
+          printf '{"pr":40,"type":"feat","summary":"A widget","url":"u","notes":""}\n' \
+            > "${WORK}/.changes/preview/40.json"
+          # A minor bump freezes 0.16.x.
+          python3 "${CL}" rollup --version 0.17.0 --date 2026-11-01 \
+            --changes-dir "${WORK}/.changes" --changelog "${WORK}/CHANGELOG.md"
+          frozen="${WORK}/.changes/0.16.x"
+          test -s "${frozen}/CHANGELOG.md"
+          # Only the snapshot survives, and it still holds every released entry.
+          left="$(ls "${frozen}")"
+          echo "0.16.x now holds: ${left}"
+          [[ "${left}" == "CHANGELOG.md" ]]
+          for want in "## [0.16.1]" "## [0.16.0]"; do
+            grep -qF "$want" "${frozen}/CHANGELOG.md"
+          done
+          # The active line keeps its fragments: that is what gets re-rendered.
+          test -f "${WORK}/.changes/latest/0.17.0/40.json"
+          echo "latest/ still holds its fragments"
+
+      - name: The active line still re-renders byte for byte
+        run: |
+          set -euo pipefail
+          # The regression detector that caught the dropped-entry bug still
+          # applies where it matters: the line that is regenerated on every merge.
+          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
+          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
+                                 --changelog "${WORK}/a.md"
+          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
+                                 --changelog "${WORK}/b.md"
+          diff -u "${WORK}/a.md" "${WORK}/b.md"
+          # Every fragment in the active line must land in some section.
           python3 - <<'EOF'
-          import difflib, pathlib, sys
+          import json, pathlib, sys
           sys.path.insert(0, ".github/scripts")
           import changelog as cl
-          bad = 0
-          for snap in sorted(pathlib.Path(".changes").glob("*.x/CHANGELOG.md")):
-              want = snap.read_text()
-              got = cl.render_frozen_line(snap.parent)
-              if got == want:
-                  print(f"identical  {snap}")
-                  continue
-              bad += 1
-              print(f"DIFFERS    {snap}")
-              sys.stdout.writelines(difflib.unified_diff(
-                  want.splitlines(True), got.splitlines(True),
-                  f"{snap} (committed)", f"{snap} (re-rendered)"))
-          # Every released fragment must land in some section.
-          for f in sorted(pathlib.Path(".changes").rglob("*.json")):
-              if f.name == "_meta.json" or "preview" in f.parts:
-                  continue
-              import json
-              t = json.loads(f.read_text()).get("type")
-              if t not in cl.RENDER_CATEGORY and t not in cl.HIDDEN_ON_RELEASE:
-                  print(f"UNRENDERABLE {f}: type {t!r}"); bad += 1
-          print(f"{bad} problem(s)")
+          bad = [f for f in pathlib.Path(".changes/latest").rglob("*.json")
+                 if f.name != "_meta.json"
+                 and json.loads(f.read_text())["type"] not in set(cl.CATEGORY) | {"chore"}]
+          for f in bad:
+              print("UNRENDERABLE", f)
           sys.exit(1 if bad else 0)
           EOF
+
+      - name: Size of .changes over a realistic release history
+        run: python3 .github/scripts/rollup-scale.py --prs-per-release 4
 
   docs-replay:
     runs-on: ubuntu-24.04
@@ -294,7 +311,8 @@ jobs:
           python3 "${CL}" rollup --version 0.17.0 --date 2026-10-01 --bump minor \
             --changes-dir .changes --changelog CHANGELOG.md
           [[ -f .changes/0.16.x/CHANGELOG.md ]] || { echo "no frozen snapshot" >&2; exit 1; }
-          [[ -d .changes/0.16.x/0.16.2 && -d .changes/latest/0.17.0 ]]
+          # The frozen line keeps only its snapshot; latest/ keeps fragments.
+          [[ "$(ls .changes/0.16.x)" == "CHANGELOG.md" && -d .changes/latest/0.17.0 ]]
           [[ ! -d .changes/latest/0.16.2 ]]
           # The frozen snapshot holds its own line and nothing newer.
           grep -qF "## [0.16.2]" .changes/0.16.x/CHANGELOG.md

@@ -65,10 +65,11 @@ expect 0 waived-bot       9 "whatever" --bot-author "dependabot[bot]"
 printf '{"pr":11,"type":"feat","summary":"s","url":"u","notes":7}\n' \
   > "${WORK}/.changes/preview/11.json"
 expect 1 invalid-fragment 11 "feat: a thing"
-# A type retired from the authoring set must be refused from a new author.
+# `doc` is a documented type; the plural `docs:` is not a type at all.
 printf '{"pr":10,"type":"doc","summary":"s","url":"u","notes":""}\n' \
   > "${WORK}/.changes/preview/10.json"
-expect 1 bad-title       10 "doc: something"
+expect 0 ok              10 "doc: something"
+expect 1 bad-title       10 "docs: something"
 
 # ---------- .changes/ integrity ----------
 
