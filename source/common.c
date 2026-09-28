@@ -4,6 +4,7 @@
  */
 
 #include <aws/common/common.h>
+#include <aws/common/cpuid.h>
 #include <aws/common/logging.h>
 #include <aws/common/math.h>
 #include <aws/common/private/dlloads.h>
@@ -121,7 +122,7 @@ static struct aws_error_info errors[] = {
         "Invalid thread settings."),
     AWS_DEFINE_ERROR_INFO_COMMON(
         AWS_ERROR_THREAD_INSUFFICIENT_RESOURCE,
-        "Insufficent resources for thread."),
+        "Insufficient resources for thread."),
     AWS_DEFINE_ERROR_INFO_COMMON(
         AWS_ERROR_THREAD_NO_PERMISSIONS,
         "Insufficient permissions for thread operation."),
@@ -283,6 +284,10 @@ static struct aws_error_info errors[] = {
     AWS_DEFINE_ERROR_INFO_COMMON(
         AWS_ERROR_CBOR_RESOURCE_LIMIT_EXCEEDED,
         "Cbor decoder resource limit exceeded."),
+    AWS_DEFINE_ERROR_INFO_COMMON(
+        AWS_ERROR_EXTERNAL_REQUEST_SHUTDOWN,
+        "Shutdown by external request."),
+
 };
 /* clang-format on */
 
@@ -327,6 +332,14 @@ void aws_common_library_init(struct aws_allocator *allocator) {
         aws_thread_initialize_thread_management();
         aws_json_module_init(allocator);
         aws_cbor_module_init(allocator);
+
+        /* Run CPU feature detection now, while still single-threaded. It caches
+         * results in non-atomic globals; detecting lazily on first use is a data
+         * race when that first use is concurrent (e.g. TSan reports on base64). */
+        for (int feature = 0; feature < AWS_CPU_FEATURE_COUNT; ++feature) {
+            (void)aws_cpu_has_feature((enum aws_cpu_feature_name)feature);
+        }
+        aws_encoding_module_init();
 
 /* NUMA is funky and we can't rely on libnuma.so being available. We also don't want to take a hard dependency on it,
  * try and load it if we can. */

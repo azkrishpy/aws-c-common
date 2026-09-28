@@ -141,18 +141,16 @@ void aws_cbor_encoder_write_float(struct aws_cbor_encoder *encoder, double value
         aws_cbor_encoder_write_single_float(encoder, (float)value);
         return;
     }
-    /* Conversation from int to floating-type is implementation defined if loss of precision */
-    if (value <= (double)INT64_MAX && value >= (double)INT64_MIN) {
-        /**
-         * A prvalue of a floating point type can be converted to a prvalue of an integer type. The conversion
-         * truncates; that is, the fractional part is discarded. The behavior is undefined if the truncated value cannot
-         * be represented in the destination type.
-         * Check against the INT64 range to avoid undefined behavior
-         *
-         * Comparing against INT64_MAX instead of UINT64_MAX to simplify the code, which may loss the opportunity to
-         * convert the UINT64 range from double to uint64_t. However, converting double to uint64_t will not benefit the
-         * total length encoded.
-         **/
+    /*
+     * Some double values can be encoded as a 32-bit CBOR integer (no more than 5 bytes) or float (exactly 5 bytes),
+     * so try to encode as a 32-bit integer first, then as a float. Fall back to double if the value is too big for
+     * a 32-bit integer or loses precision as a float.
+     */
+    if (value <= (double)UINT32_MAX && value >= -((double)UINT32_MAX + 1)) {
+        /* double -> integer truncates the fractional part; comparing the result back against the original then rejects
+         * non-integral values.
+         * NOTE: It is UB if the value is out of the integer type's range, but the range check above keeps it within
+         * bounds. */
         int64_t int_value = (int64_t)value;
         if (value == (double)int_value) {
             if (int_value < 0) {
@@ -302,6 +300,9 @@ struct aws_cbor_decoder {
 
     struct aws_cbor_decoder_context cached_context;
 
+    /* Number of bytes from src consumed by peek (cached but not yet popped) */
+    size_t cached_bytes_consumed;
+
     /* Error code during decoding. Fail the decoding process without recovering, */
     int error_code;
 
@@ -324,6 +325,15 @@ struct aws_cbor_decoder *aws_cbor_decoder_destroy(struct aws_cbor_decoder *decod
 }
 
 size_t aws_cbor_decoder_get_remaining_length(const struct aws_cbor_decoder *decoder) {
+    return decoder->src.len;
+}
+
+size_t aws_cbor_decoder_get_unconsumed_length(const struct aws_cbor_decoder *decoder) {
+    if (decoder->cached_context.type != AWS_CBOR_TYPE_UNKNOWN) {
+        /* peek_type decodes the next element and advances src, but from the caller's perspective
+         * those bytes haven't been consumed yet (the item hasn't been popped). Add them back. */
+        return decoder->src.len + decoder->cached_bytes_consumed;
+    }
     return decoder->src.len;
 }
 
@@ -506,6 +516,7 @@ static int s_cbor_decode_next_element(struct aws_cbor_decoder *decoder) {
     }
 
     aws_byte_cursor_advance(&decoder->src, result.read);
+    decoder->cached_bytes_consumed = result.read;
 
     return AWS_OP_SUCCESS;
 }
