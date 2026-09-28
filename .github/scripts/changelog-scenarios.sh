@@ -23,14 +23,15 @@ frag() {
 # expect <rc> <reason> <pr> <title> [extra args...]
 expect() {
   local want_rc="$1" want_reason="$2" pr="$3" title="$4"; shift 4
+  local LABEL="${LABEL:-}"
   local out rc reason
   out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
            --changes-dir "${WORK}/.changes" "$@" 2>&1)"; rc=$?
   reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
   if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
-    echo "ok    rc=$rc reason=$reason  <- $title"; pass=$((pass+1))
+    echo "ok    rc=$rc reason=$reason  <- ${LABEL:-$title}"; pass=$((pass+1))
   else
-    echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $title"
+    echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- ${LABEL:-$title}"
     fail=$((fail+1))
   fi
 }
@@ -38,20 +39,11 @@ expect() {
 # paths <rc> <reason> <pr> <title> <label> <status:path>...
 paths() {
   local want_rc="$1" want_reason="$2" pr="$3" title="$4" label="$5"; shift 5
-  local pf="${WORK}/paths.$$.$RANDOM"; : > "$pf"
-  local e
+  local pf="${WORK}/paths.$$.$RANDOM" e
+  : > "$pf"
   for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e#*:}" >> "$pf"; done
-  local out rc reason
-  out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
-           --changes-dir "${WORK}/.changes" --changed-paths-file "$pf" \
-           --changes-prefix .changes 2>&1)"; rc=$?
-  reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
-  if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
-    echo "ok    rc=$rc reason=$reason  <- $label"; pass=$((pass+1))
-  else
-    echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $label"
-    fail=$((fail+1))
-  fi
+  LABEL="$label" expect "$want_rc" "$want_reason" "$pr" "$title" \
+    --changed-paths-file "$pf" --changes-prefix .changes
 }
 
 # ---------- the check gate ----------

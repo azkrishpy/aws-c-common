@@ -24,7 +24,7 @@ CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
 
 # Types no longer accepted from authors but present in already-released
 # directories. Released notes are immutable, so they must still render.
-RETIRED_CATEGORY = {"doc": "Docs"}
+RETIRED_TYPES = {"doc"}
 
 # Rendering order: a retired type keeps the position it shipped in.
 RENDER_CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
@@ -35,7 +35,7 @@ HIDDEN_ON_RELEASE = {"chore"}
 
 # Every accepted type must either render or be deliberately hidden, or a
 # released entry could pass validation and still vanish from the output.
-assert set(RENDER_CATEGORY) | HIDDEN_ON_RELEASE == VALID_TYPES | set(RETIRED_CATEGORY)
+assert set(RENDER_CATEGORY) | HIDDEN_ON_RELEASE == VALID_TYPES | RETIRED_TYPES
 
 TITLE_RE = re.compile(
     r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
@@ -74,7 +74,7 @@ def validate_fragment(path):
         return [f"{path}: invalid JSON: {e}"]
     for k in sorted(REQUIRED_FRAGMENT - set(data)):
         errs.append(f"{path}: missing field: {k}")
-    if data.get("type") not in VALID_TYPES | set(RETIRED_CATEGORY):
+    if data.get("type") not in VALID_TYPES | RETIRED_TYPES:
         errs.append(f"{path}: type must be one of {sorted(VALID_TYPES)}")
     s = data.get("summary")
     if not isinstance(s, str) or not s.strip():
@@ -221,7 +221,7 @@ def _release_sections(release_dirs):
 
 
 def audit_released(changes_dir):
-    """Errors for released fragments that would render nowhere.
+    """Report released fragments that fail the schema. True if any did.
 
     A WARN here means a published entry disappears from the regenerated file,
     so every caller that writes a changelog must stop instead.
@@ -235,7 +235,9 @@ def audit_released(changes_dir):
                 if f.name == "_meta.json":
                     continue
                 errs.extend(validate_fragment(f))
-    return errs
+    for e in errs:
+        _err(e)
+    return bool(errs)
 
 
 def render_root_changelog(changes_dir):
@@ -538,9 +540,7 @@ def _open_release_dir(changes, latest, new_version, date, highlights):
 
 
 def cmd_render(args):
-    if errs := audit_released(args.changes_dir):
-        for e in errs:
-            _err(e)
+    if audit_released(args.changes_dir):
         return 2
     text = render_root_changelog(args.changes_dir)
     Path(args.changelog).write_text(text)
@@ -554,9 +554,7 @@ def cmd_rollup(args):
     latest = changes / "latest"
     latest.mkdir(parents=True, exist_ok=True)
 
-    if errs := audit_released(changes):
-        for e in errs:
-            _err(e)
+    if audit_released(changes):
         return 2
 
     # A crash mid-freeze can leave a frozen line with no snapshot. It is a pure

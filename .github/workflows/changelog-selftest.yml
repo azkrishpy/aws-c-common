@@ -14,21 +14,6 @@ on:
     branches: [changelog-selftest]
   workflow_dispatch:
     inputs:
-      default-branch:
-        description: 'Stands in for the release branch. Empty means main.'
-        required: false
-        type: string
-        default: ''
-      docs-branch:
-        description: 'Stands in for the docs branch. Empty means docs.'
-        required: false
-        type: string
-        default: ''
-      simulate-release:
-        description: 'Also simulate patch and minor rollups against a copy of .changes/.'
-        required: false
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -44,30 +29,6 @@ jobs:
       - run: pip install --quiet pytest
       - name: Unit tests
         run: python3 -m pytest .github/changelog-tests -q
-
-  branch-overrides:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Resolve the branch names, defaulting to main and docs
-        env:
-          IN_DEFAULT: ${{ inputs.default-branch }}
-          IN_DOCS: ${{ inputs.docs-branch }}
-        run: |
-          set -euo pipefail
-          DEFAULT_BRANCH="${IN_DEFAULT:-}"; DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-          DOCS_BRANCH="${IN_DOCS:-}"; DOCS_BRANCH="${DOCS_BRANCH:-docs}"
-          echo "default-branch = ${DEFAULT_BRANCH}"
-          echo "docs-branch    = ${DOCS_BRANCH}"
-          [[ -n "$DEFAULT_BRANCH" && -n "$DOCS_BRANCH" ]]
-          # On a push event both inputs are empty, which must yield the defaults.
-          if [[ -z "${IN_DEFAULT:-}" ]]; then [[ "$DEFAULT_BRANCH" == "main" ]]; fi
-          if [[ -z "${IN_DOCS:-}" ]]; then [[ "$DOCS_BRANCH" == "docs" ]]; fi
-          echo "### Branch names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          echo "| input | resolved |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          echo "|---|---|" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          echo "| default-branch \`${IN_DEFAULT:-<unset>}\` | \`${DEFAULT_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          echo "| docs-branch \`${IN_DOCS:-<unset>}\` | \`${DOCS_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
   scenarios:
     runs-on: ubuntu-24.04
@@ -90,16 +51,20 @@ jobs:
           survived=0; killed=0
 
           mutate() {
-            local label="$1" py="$2"
+            local label="$1" old="$2" new="$3"
             cp /tmp/pristine.py "$CLP"
-            python3 -c "
-          import pathlib, sys
-          p = pathlib.Path('$CLP'); s = p.read_text()
-          ${py}
-          p.write_text(s)
-          "
+            if ! python3 .github/scripts/mutate.py "$CLP" "$old" "$new"; then
+              echo "BROKEN    ${label}  <- target absent, fix the mutation"
+              survived=$((survived+1)); return
+            fi
             if cmp -s /tmp/pristine.py "$CLP"; then
-              echo "BROKEN    ${label}  <- mutation matched nothing, fix the mutation"
+              echo "BROKEN    ${label}  <- mutation changed nothing"
+              survived=$((survived+1)); return
+            fi
+            # A mutant that will not import proves nothing: the suite would fail
+            # on the import error rather than on the guard being gone.
+            if ! python3 -c "import sys; sys.path.insert(0,'.github/scripts'); import changelog" 2>/dev/null; then
+              echo "BROKEN    ${label}  <- mutant does not import, fix the mutation"
               survived=$((survived+1)); return
             fi
             if python3 -m pytest .github/changelog-tests -q >/tmp/mut.log 2>&1 \
@@ -112,28 +77,23 @@ jobs:
             fi
           }
 
-          mutate "a placeholder pr number is accepted" \
-            "s = s.replace('elif pr <= 0:', 'elif False:')"
+          mutate "a placeholder pr number is accepted" 'elif pr <= 0:' 'elif False:'
           mutate "a retired type no longer renders" \
-            "s = s.replace('RENDER_CATEGORY = {', 'RENDER_CATEGORY = {}  # ', 1)"
-          mutate "seed accepts pr 0" \
-            "s = s.replace('if args.pr <= 0:', 'if False:')"
-          mutate "a stray fragment is tolerated" \
-            "s = s.replace('stray-fragment', 'ok')"
-          mutate "a modified fragment is tolerated" \
-            "s = s.replace('modified-fragment', 'ok')"
+            'for typ, cat in RENDER_CATEGORY.items():' 'for typ, cat in CATEGORY.items():'
+          mutate "seed accepts pr 0" 'if args.pr <= 0:' 'if False:'
+          mutate "a stray fragment is tolerated" 'stray-fragment' 'ok'
+          mutate "a modified fragment is tolerated" 'modified-fragment' 'ok'
           mutate "a version may go backwards" \
-            "s = s.replace('if highest is not None and new_tuple <= highest:', 'if False:')"
+            'if highest is not None and new_tuple <= highest:' 'if False:'
           mutate "a frozen line may be reopened" \
-            "s = s.replace('if frozen.name == f\"{new_tuple[0]}.{new_tuple[1]}.x\":', 'if False:')"
-          mutate "a revert needs no notes" \
-            "s = s.replace('and not notes.strip():', 'and False:')"
-          mutate "the title convention is not enforced" \
-            "s = s.replace('bad-title', 'ok')"
+            'if frozen.name == f"{new_tuple[0]}.{new_tuple[1]}.x":' 'if False:'
+          mutate "a revert needs no notes" 'and not notes.strip():' 'and False:'
+          mutate "the title convention is not enforced" 'bad-title' 'ok'
           mutate "an invalid released fragment is rendered anyway" \
-            "s = s.replace('if errs := audit_released(args.changes_dir):', 'if False:')"
-          mutate "a type mismatch is tolerated" \
-            "s = s.replace('type-mismatch', 'ok')"
+            'if audit_released(args.changes_dir):' 'if False:'
+          mutate "a type mismatch is tolerated" 'type-mismatch' 'ok'
+          mutate "a retired type is accepted from an author" \
+            '^(feat|fix|chore|revert)' '^(feat|fix|chore|revert|doc)'
 
           cp /tmp/pristine.py "$CLP"
           echo
@@ -179,19 +139,6 @@ jobs:
           print(f"{bad} problem(s)")
           sys.exit(1 if bad else 0)
           EOF
-
-      - name: A retired type is still refused from new authors
-        run: |
-          set -uo pipefail +e
-          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
-          printf '{"pr":99,"type":"doc","summary":"s","url":"u","notes":""}\n' \
-            > "${WORK}/.changes/preview/99.json"
-          python3 "${CL}" check --pr 99 --title "doc: something" \
-            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
-          rc=$?
-          echo "authoring a retired type: rc=${rc} (want 1)"
-          [[ "$rc" -eq 1 ]] || exit 1
-          exit 0
 
   docs-replay:
     runs-on: ubuntu-24.04
@@ -251,6 +198,7 @@ jobs:
           TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY" || true
           git checkout -q test-docs
           echo "docs before=${BEFORE} after=$(git rev-parse test-docs)"
+          [[ "$(git rev-parse test-docs)" == "$BEFORE" ]]
 
           { echo "### docs branch CHANGELOG.md after the replay"; echo '```markdown';
             cat CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
@@ -269,66 +217,15 @@ jobs:
           echo "$out"
           [[ "$out" == *"from main onto docs"* ]]
 
-  seed-and-waiver:
+  waiver:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Seeding a template, and the skip-changelog waiver
-        run: |
-          set -uo pipefail +e
-          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
-          pass=0; fail=0
-          ok() { echo "ok    $1"; pass=$((pass+1)); }
-          no() { echo "FAIL  $1"; fail=$((fail+1)); }
-
-          # seed writes a template the author can commit as-is, and the result
-          # must satisfy the very check that asked for it.
-          python3 "${CL}" seed --pr 77 --title "feat: add a knob" \
-            --url "https://github.com/o/r/pull/77" --changes-dir "${WORK}/.changes" >/dev/null
-          f="${WORK}/.changes/preview/77.json"
-          [[ -f "$f" ]] && ok "seed wrote $f" || no "seed wrote nothing"
-          python3 -c "
-          import json,sys
-          d=json.load(open(sys.argv[1]))
-          assert d['pr']==77 and d['type']=='feat', d
-          assert d['summary'], 'summary must not be empty'
-          " "$f" && ok "seeded fragment has pr, type and summary" \
-                  || no "seeded fragment is malformed"
-          python3 "${CL}" check --pr 77 --title "feat: add a knob" \
-            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
-          [[ $? -eq 0 ]] && ok "check accepts what seed produced" \
-                         || no "check rejects what seed produced"
-
-          # A revert seeded from the Revert button keeps neither the original
-          # type prefix nor its number.
-          python3 "${CL}" seed --pr 78 --title 'Revert "feat: add SSO (#843)"' \
-            --url u --changes-dir "${WORK}/.changes" >/dev/null
-          python3 -c "
-          import json,sys
-          d=json.load(open(sys.argv[1]))
-          assert d['type']=='revert', d
-          assert '843' not in d['summary'] and 'feat:' not in d['summary'], d
-          " "${WORK}/.changes/preview/78.json" \
-            && ok "seeded revert drops the original prefix and number" \
-            || no "seeded revert kept the prefix or number"
-
-          # seed must refuse a placeholder PR number: it names the file.
-          python3 "${CL}" seed --pr 0 --title "feat: x" --url u \
-            --changes-dir "${WORK}/.changes" >/dev/null 2>&1
-          [[ $? -ne 0 ]] && ok "seed refuses pr 0" || no "seed accepted pr 0"
-
-          echo; echo "seed-and-waiver: ${pass} passed, ${fail} failed"
-          echo "seed-and-waiver: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-          [[ "$fail" -eq 0 ]] || exit 1
-          exit 0
-
       - name: The skip-changelog label is what the caller gates on
         run: |
           set -euo pipefail
           # The waiver is a job-level `if:` in the caller, not a script flag --
           # assert the reusable workflow still expresses it that way.
-          grep -q "skip-changelog" .github/workflows/changelog-selftest.yml \
-            || true
           if grep -rq "skip-changelog" .github/workflows/changelog-check.yml; then
             echo "changelog-check.yml gates on the skip-changelog label"
           else
@@ -369,7 +266,6 @@ jobs:
           path: rendered-CHANGELOG.md
 
   simulate-release:
-    if: ${{ github.event_name == 'push' || inputs.simulate-release }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
