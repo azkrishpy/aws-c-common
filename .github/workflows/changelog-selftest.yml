@@ -1,0 +1,311 @@
+# Level 1 validation for the changelog tooling, self-contained in this repo.
+#
+# Uses .github/scripts/changelog.py directly -- no aws-crt-builder checkout, no
+# AWS credentials, no deploy key. Nothing is ever committed or pushed: the
+# release simulation copies .changes/ to a scratch directory first, so every
+# run leaves this repo byte-identical.
+#
+# Once this passes, the same script moves back behind the Pre-merge checks job.
+
+name: Changelog selftest
+
+on:
+  push:
+    branches: [changelog-selftest]
+  workflow_dispatch:
+    inputs:
+      default-branch:
+        description: 'Stands in for the release branch. Empty means main.'
+        required: false
+        type: string
+        default: ''
+      docs-branch:
+        description: 'Stands in for the docs branch. Empty means docs.'
+        required: false
+        type: string
+        default: ''
+      simulate-release:
+        description: 'Also simulate patch and minor rollups against a copy of .changes/.'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CL: ${{ github.workspace }}/.github/scripts/changelog.py
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install --quiet pytest
+      - name: Unit tests
+        run: python3 -m pytest .github/changelog-tests -q
+
+  branch-overrides:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve the branch names, defaulting to main and docs
+        env:
+          IN_DEFAULT: ${{ inputs.default-branch }}
+          IN_DOCS: ${{ inputs.docs-branch }}
+        run: |
+          set -euo pipefail
+          DEFAULT_BRANCH="${IN_DEFAULT:-main}"
+          DOCS_BRANCH="${IN_DOCS:-docs}"
+          echo "default-branch = ${DEFAULT_BRANCH}"
+          echo "docs-branch    = ${DOCS_BRANCH}"
+          [[ -n "$DEFAULT_BRANCH" && -n "$DOCS_BRANCH" ]]
+          # On a push event both inputs are empty, which must yield the defaults.
+          if [[ -z "${IN_DEFAULT}" ]]; then [[ "$DEFAULT_BRANCH" == "main" ]]; fi
+          if [[ -z "${IN_DOCS}" ]]; then [[ "$DOCS_BRANCH" == "docs" ]]; fi
+          echo "### Branch names" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "| input | resolved |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "|---|---|" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "| default-branch \`${IN_DEFAULT:-<unset>}\` | \`${DEFAULT_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "| docs-branch \`${IN_DOCS:-<unset>}\` | \`${DOCS_BRANCH}\` |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+  check-scenarios:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every check outcome, against a scratch tree
+        run: |
+          set -uo pipefail
+          WORK="$(mktemp -d)"
+          mkdir -p "${WORK}/.changes/preview"
+          pass=0; fail=0
+
+          # expect <want-rc> <want-reason> <pr> <title> [extra args...]
+          expect() {
+            local want_rc="$1" want_reason="$2" pr="$3" title="$4"; shift 4
+            local out rc
+            out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
+                     --changes-dir "${WORK}/.changes" "$@" 2>&1)"; rc=$?
+            local reason
+            reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
+            if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
+              echo "ok    rc=$rc reason=$reason  <- $title"
+              pass=$((pass+1))
+            else
+              echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $title"
+              echo "$out" | sed 's/^/        /'
+              fail=$((fail+1))
+            fi
+          }
+
+          frag() {
+            printf '{"pr":%s,"type":"%s","summary":"%s","url":"u","notes":"%s"}\n' \
+              "$1" "$2" "$3" "${4:-}" > "${WORK}/.changes/preview/$1.json"
+          }
+
+          # A chore needs no fragment and may touch any preview fragment.
+          expect 0 exempt-type            1 "chore: bump a pin"
+          # A feat without one is author-fixable and earns a template.
+          expect 1 missing-fragment       2 "feat: add a thing"
+          # A title off-convention cannot yield a type at all.
+          expect 1 bad-title              3 "add a thing"
+          # The Revert button's title is accepted verbatim.
+          frag 4 revert "Reverted the retry default" "It changed behaviour customers relied on."
+          expect 0 ok                     4 'Revert "fix: retry default (#3)"'
+          # A valid fragment that agrees with the title.
+          frag 5 feat "Add SSO sign-in"
+          expect 0 ok                     5 "feat: add SSO sign-in"
+          # Fragment type disagreeing with the title.
+          frag 6 fix "Mislabelled"
+          expect 1 type-mismatch          6 "feat: add a thing"
+          # A fragment at the right path whose inner pr points elsewhere.
+          printf '{"pr":7,"type":"feat","summary":"Wrong number","url":"u","notes":""}\n' \
+            > "${WORK}/.changes/preview/8.json"
+          expect 1 pr-mismatch            8 "feat: add a thing"
+          # A bot author waives both the title convention and the fragment.
+          expect 0 waived-bot             9 "whatever" --bot-author dependabot[bot]
+
+          echo
+          echo "check scenarios: ${pass} passed, ${fail} failed"
+          echo "check scenarios: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          [[ "$fail" -eq 0 ]]
+
+  changed-paths:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: The .changes/ integrity rules
+        run: |
+          set -uo pipefail
+          WORK="$(mktemp -d)"; mkdir -p "${WORK}/.changes/preview"
+          pass=0; fail=0
+          printf '{"pr":30,"type":"feat","summary":"Mine","url":"u","notes":""}\n' \
+            > "${WORK}/.changes/preview/30.json"
+          printf '{"pr":31,"type":"feat","summary":"Theirs","url":"u","notes":""}\n' \
+            > "${WORK}/.changes/preview/31.json"
+
+          run_paths() {
+            local want_rc="$1" want_reason="$2" pr="$3" title="$4" label="$5"; shift 5
+            local pf="${WORK}/paths.$RANDOM"; : > "$pf"
+            for e in "$@"; do printf '%s\t%s\n' "${e%%:*}" "${e#*:}" >> "$pf"; done
+            local out rc reason
+            out="$(python3 "${CL}" check --pr "$pr" --title "$title" \
+                     --changes-dir "${WORK}/.changes" --changed-paths-file "$pf" \
+                     --changes-prefix .changes 2>&1)"; rc=$?
+            reason="$(sed -n 's/^CHANGELOG_CHECK_REASON:://p' <<< "$out")"
+            if [[ "$rc" == "$want_rc" && "$reason" == "$want_reason" ]]; then
+              echo "ok    rc=$rc reason=$reason  <- $label"; pass=$((pass+1))
+            else
+              echo "FAIL  want rc=$want_rc reason=$want_reason, got rc=$rc reason=$reason  <- $label"
+              echo "$out" | sed 's/^/        /'; fail=$((fail+1))
+            fi
+          }
+
+          run_paths 0 ok 30 "feat: mine" "adds exactly its own fragment" \
+            "added:.changes/preview/30.json"
+          run_paths 1 stray-fragment 30 "feat: mine" "also adds someone else's" \
+            "added:.changes/preview/30.json" "added:.changes/preview/9999.json"
+          run_paths 1 modified-fragment 30 "feat: mine" "rewrites an existing fragment" \
+            "modified:.changes/preview/30.json"
+          # A chore is exempt from the fragment rule AND may curate other
+          # fragments -- that is the point of a maintenance change.
+          run_paths 0 exempt-type 32 "chore: tidy past entries" "chore curates another entry" \
+            "modified:.changes/preview/31.json"
+
+          echo
+          echo "changed-paths: ${pass} passed, ${fail} failed"
+          echo "changed-paths: ${pass} passed, ${fail} failed" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          [[ "$fail" -eq 0 ]]
+
+  released-fragment-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every fragment already released must still render
+        run: |
+          set -euo pipefail
+          # Released history is immutable, but it is validated against today's
+          # schema. A type that was valid when it shipped and is not valid now
+          # renders nowhere, so a re-render silently drops a published entry.
+          python3 - <<'EOF'
+          import json, pathlib, sys
+          sys.path.insert(0, ".github/scripts")
+          import changelog as cl
+          bad = []
+          for f in sorted(pathlib.Path(".changes").rglob("*.json")):
+              if f.name == "_meta.json":
+                  continue
+              try:
+                  t = json.loads(f.read_text()).get("type")
+              except Exception as e:
+                  bad.append((f, f"unparseable: {e}")); continue
+              # A released chore rendering nowhere is by design; a type that is
+              # no longer in VALID_TYPES at all is the schema having moved.
+              if t not in cl.VALID_TYPES:
+                  bad.append((f, f"type {t!r} is no longer valid, so it renders nowhere"))
+          for f, why in bad:
+              print(f"ORPHANED: {f}: {why}")
+          print(f"{len(bad)} orphaned fragment(s)")
+          sys.exit(1 if bad else 0)
+          EOF
+  render-real-tree:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render this repo's real .changes/ tree
+        run: |
+          set -euo pipefail
+          # Render to a scratch path so the checked-in CHANGELOG.md is untouched.
+          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
+          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
+                                 --changelog "${WORK}/CHANGELOG.md"
+          # The render must be byte-identical on a second run.
+          cp "${WORK}/CHANGELOG.md" "${WORK}/first.md"
+          python3 "${CL}" render --changes-dir "${WORK}/.changes" \
+                                 --changelog "${WORK}/CHANGELOG.md"
+          diff -u "${WORK}/first.md" "${WORK}/CHANGELOG.md"
+          # Everything released so far must appear, and the preview fragment too.
+          for want in "## [Preview]" "(#24)" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
+            grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
+          done
+          # A chore renders nowhere and no empty section is emitted.
+          ! grep -qF "### Maintenance" "${WORK}/CHANGELOG.md"
+          cp "${WORK}/CHANGELOG.md" rendered-CHANGELOG.md
+          { echo "### Rendered from the real tree"; echo '```markdown';
+            cat rendered-CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          echo "--- repo is unchanged:"; git status --porcelain -- .changes CHANGELOG.md
+          [[ -z "$(git status --porcelain -- .changes CHANGELOG.md)" ]]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rendered-changelog
+          path: rendered-CHANGELOG.md
+
+  simulate-release:
+    if: ${{ github.event_name == 'push' || inputs.simulate-release }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Simulate a patch then a minor rollup, on a copy
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
+          cd "${WORK}"
+          echo "=== starting point"
+          find .changes -maxdepth 2 -type d | sort
+
+          # --- patch: 0.16.2 accretes beside 0.16.0 and 0.16.1 in latest/
+          echo "=== patch 0.16.2"
+          python3 "${CL}" rollup --version 0.16.2 --date 2026-09-01 \
+            --changes-dir .changes --changelog CHANGELOG.md
+          [[ -f .changes/latest/0.16.2/24.json ]] || { echo "fragment did not move" >&2; exit 1; }
+          [[ -d .changes/latest/0.16.0 && -d .changes/latest/0.16.1 ]]
+          [[ -z "$(ls -A .changes/preview)" ]] || { echo "preview not drained" >&2; exit 1; }
+          grep -qF "## [0.16.2]" CHANGELOG.md
+          cp CHANGELOG.md /tmp/after-patch.md
+
+          # --- minor: freezes 0.16.x and opens a fresh latest/
+          printf '{"pr":25,"type":"feat","summary":"New retry strategy","url":"u","notes":""}\n' \
+            > .changes/preview/25.json
+          echo "=== minor 0.17.0"
+          python3 "${CL}" rollup --version 0.17.0 --date 2026-10-01 --bump minor \
+            --changes-dir .changes --changelog CHANGELOG.md
+          [[ -f .changes/0.16.x/CHANGELOG.md ]] || { echo "no frozen snapshot" >&2; exit 1; }
+          [[ -d .changes/0.16.x/0.16.2 && -d .changes/latest/0.17.0 ]]
+          [[ ! -d .changes/latest/0.16.2 ]]
+          # The frozen snapshot holds its own line and nothing newer.
+          grep -qF "## [0.16.2]" .changes/0.16.x/CHANGELOG.md
+          ! grep -qF "0.17.0" .changes/0.16.x/CHANGELOG.md
+          # The root holds the new line and links the frozen ones.
+          grep -qF "## [0.17.0]" CHANGELOG.md
+          ! grep -qF "## [0.16.2]" CHANGELOG.md
+          grep -qF "0.16.x" CHANGELOG.md && grep -qF "0.15.x" CHANGELOG.md
+
+          # --- guards: a release must never go backwards or reopen a frozen line
+          echo "=== guards"
+          ! python3 "${CL}" rollup --version 0.16.3 --date 2026-10-02 \
+              --changes-dir .changes --changelog CHANGELOG.md
+          ! python3 "${CL}" rollup --version 0.17.0 --date 2026-10-02 \
+              --changes-dir .changes --changelog CHANGELOG.md
+          ! python3 "${CL}" rollup --version 0.18.0 --date 2026-10-02 --bump patch \
+              --changes-dir .changes --changelog CHANGELOG.md
+          echo "all three refused, as expected"
+
+          mkdir -p "${GITHUB_WORKSPACE}/sim"
+          cp /tmp/after-patch.md "${GITHUB_WORKSPACE}/sim/after-patch-0.16.2.md"
+          cp CHANGELOG.md "${GITHUB_WORKSPACE}/sim/after-minor-0.17.0.md"
+          cp .changes/0.16.x/CHANGELOG.md "${GITHUB_WORKSPACE}/sim/frozen-0.16.x.md"
+          find .changes -type f | sort > "${GITHUB_WORKSPACE}/sim/final-tree.txt"
+          { echo "### After the simulated minor (root)"; echo '```markdown';
+            cat CHANGELOG.md; echo '```';
+            echo "### Frozen 0.16.x snapshot"; echo '```markdown';
+            cat .changes/0.16.x/CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+      - name: This repo must be untouched
+        run: |
+          set -euo pipefail
+          git status --porcelain -- .changes CHANGELOG.md
+          [[ -z "$(git status --porcelain -- .changes CHANGELOG.md)" ]]
+          echo "no release was made; .changes/ and CHANGELOG.md are unchanged"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-simulation
+          path: sim/
