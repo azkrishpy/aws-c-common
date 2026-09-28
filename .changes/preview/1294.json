@@ -1,0 +1,6 @@
+{
+  "pr": 1294,
+  "type": "feat",
+  "summary": "Add aws_uuid_v7 for time-ordered identifiers",
+  "notes": ""
+}

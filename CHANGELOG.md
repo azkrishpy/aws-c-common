@@ -3,7 +3,8 @@
 <!-- changelog:unreleased -->
 ## [Unreleased]
 
-_Nothing yet._
+### Features
+- Add aws_uuid_v7 for time-ordered identifiers. ([#1294](../../pull/1294))
 <!-- /changelog:unreleased -->
 
 ## [1.2.1] — 2026-09-26
