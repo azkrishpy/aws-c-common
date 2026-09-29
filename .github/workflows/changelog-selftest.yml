@@ -221,7 +221,7 @@ jobs:
                                  --changelog "${WORK}/CHANGELOG.md"
           diff -u "${WORK}/first.md" "${WORK}/CHANGELOG.md"
           # Everything released so far must appear, and the preview fragment too.
-          for want in "## [Preview]" "(#24)" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
+          for want in "## [Preview]" "([#24]" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
             grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
           done
           cp "${WORK}/CHANGELOG.md" rendered-CHANGELOG.md
@@ -260,7 +260,7 @@ jobs:
           printf '{"pr":25,"type":"feat","summary":"New retry strategy","url":"u","notes":""}\n' \
             > .changes/preview/25.json
           echo "=== minor 0.17.0"
-          python3 "${CL}" rollup --version 0.17.0 --date 2026-10-01 --bump minor \
+          python3 "${CL}" rollup --version 0.17.0 --date 2026-10-01 \
             --changes-dir .changes --changelog CHANGELOG.md
           [[ -f .changes/0.16.x/CHANGELOG.md ]] || { echo "no frozen snapshot" >&2; exit 1; }
           # The frozen line keeps only its snapshot; latest/ keeps fragments.
@@ -280,8 +280,6 @@ jobs:
           ! python3 "${CL}" rollup --version 0.16.3 --date 2026-10-02 \
               --changes-dir .changes --changelog CHANGELOG.md
           ! python3 "${CL}" rollup --version 0.17.0 --date 2026-10-02 \
-              --changes-dir .changes --changelog CHANGELOG.md
-          ! python3 "${CL}" rollup --version 0.18.0 --date 2026-10-02 --bump patch \
               --changes-dir .changes --changelog CHANGELOG.md
           echo "all three refused, as expected"
 

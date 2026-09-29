@@ -1,6 +1,6 @@
-# Changelog
+# Changelog — 0.16.x
 
-## [Preview]
+## [0.16.2] — 2026-09-01
 
 ### Features
 - Add a thing. ([#24](https://github.com/azkrishpy/aws-c-common/pull/24))
@@ -16,7 +16,3 @@ Highlights: New socket options layout.
 
 ### Features
 - Replace aws_socket_options struct layout. ([#20](https://github.com/azkrishpy/aws-c-common/pull/20))
-
-## Earlier releases
-
-- [0.15.x](.changes/0.15.x/CHANGELOG.md)

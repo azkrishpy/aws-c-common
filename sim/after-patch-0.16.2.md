@@ -1,6 +1,8 @@
 # Changelog
 
-## [Preview]
+Unreleased changes are rendered on the [`docs`](../../tree/docs/CHANGELOG.md) branch.
+
+## [0.16.2] — 2026-09-01
 
 ### Features
 - Add a thing. ([#24](https://github.com/azkrishpy/aws-c-common/pull/24))
