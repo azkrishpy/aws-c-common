@@ -88,7 +88,9 @@ jobs:
           mutate "a version may go backwards" \
             'if highest is not None and new_tuple <= highest:' 'if False:'
           mutate "a frozen line may be reopened" \
-            'if frozen.name == f"{new_tuple[0]}.{new_tuple[1]}.x":' 'if False:'
+            'if new_tuple[:2] == line:' 'if False:'
+          mutate "a version older than a frozen line is accepted" \
+            'if new_tuple[:2] < line:' 'if False:'
           mutate "a revert needs no notes" 'and not notes.strip():' 'and False:'
           mutate "the title convention is not enforced" 'bad-title' 'ok'
           mutate "an invalid released fragment is rendered anyway" \
