@@ -206,22 +206,6 @@ jobs:
           echo "$out"
           [[ "$out" == *"from main onto docs"* ]]
 
-  waiver:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: The skip-changelog label is what the caller gates on
-        run: |
-          set -euo pipefail
-          # The waiver is a job-level `if:` in the caller, not a script flag --
-          # assert the reusable workflow still expresses it that way.
-          if grep -rq "skip-changelog" .github/workflows/changelog-check.yml; then
-            echo "changelog-check.yml gates on the skip-changelog label"
-          else
-            echo "ERROR: no skip-changelog gate found in changelog-check.yml" >&2
-            exit 1
-          fi
-
   render-real-tree:
     runs-on: ubuntu-24.04
     steps:

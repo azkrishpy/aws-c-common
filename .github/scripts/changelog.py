@@ -439,8 +439,7 @@ def cmd_check(args):
             f"       expected: {frag}\n"
             f"       a `{typ}` change is customer-visible, so it needs an entry.\n"
             f"       commit that file with this pull request -- the bot comments a\n"
-            f"       ready-to-paste template -- or apply the `skip-changelog` label\n"
-            f"       for CI-only / pure-infra changes.",
+            f"       ready-to-paste template.",
             file=sys.stderr,
         )
         reason("missing-fragment")

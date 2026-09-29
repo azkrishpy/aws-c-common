@@ -73,6 +73,5 @@ Next steps (do this yourself — the bot will not commit for you):
   4. git push
 
 A feat, fix or revert PR fails its merge checks without a valid fragment; a
-chore needs none. Apply the 'skip-changelog' label only for CI-only /
-pure-infra PRs.
+chore needs none, so a CI-only or pure-infra PR belongs under that type.
 EOF
