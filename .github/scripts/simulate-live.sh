@@ -27,6 +27,15 @@ done
 chmod +x "${BIN}"/*
 CL="${BIN}/changelog.py"
 
+# docs-replay.sh prefers a remote docs branch when one exists -- correct in
+# production, wrong here: a rerun would replay onto a previous run's state and
+# conflict. Refuse rather than build a half-stale branch.
+if git ls-remote --exit-code --heads origin "$DOCS" >/dev/null 2>&1; then
+  echo "ERROR: ${DOCS} exists on origin; a rerun would replay onto it." >&2
+  echo "       Delete it first: git push origin --delete ${DOCS}" >&2
+  exit 1
+fi
+
 git checkout -q -B "$SIM" "$BASE"
 git branch -qD "$DOCS" 2>/dev/null || true
 
