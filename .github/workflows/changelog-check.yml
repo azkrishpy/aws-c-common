@@ -2,19 +2,18 @@
 # Fails PR CI if the PR title lacks a `<type>:` prefix, or if a valid
 # changelog fragment is missing.
 # The title check always runs. The fragment requirement is waived when the
-# PR touches only infra paths; the whole job is skipped by `skip-changelog`.
+# PR touches only infra paths.
 
 name: Changelog Check
 on:
   pull_request:
     # `edited` matters: it is what fires when someone retitles the PR, so a
     # title fix re-runs this check instead of leaving a stale red X.
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+    types: [opened, edited, synchronize, reopened]
 
 jobs:
   changelog-check:
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'skip-changelog') }}
     steps:
       - uses: actions/checkout@v4
         with:
