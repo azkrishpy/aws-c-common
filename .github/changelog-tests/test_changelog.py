@@ -58,7 +58,7 @@ def test_seed_no_prefix_becomes_chore(tmp_path):
     assert d["summary"] == "Just some cleanup"
 
 
-def test_seed_does_not_overwrite_without_force(tmp_path):
+def test_seed_refuses_to_overwrite(tmp_path):
     _seed(tmp_path, 1, "feat: a")
     # Non-zero, so a caller cannot mistake "declined" for "wrote it".
     assert _seed(tmp_path, 1, "feat: b") == 1

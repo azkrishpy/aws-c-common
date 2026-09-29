@@ -304,11 +304,15 @@ def cmd_seed(args):
     """Write the fragment a pull request is missing, derived from its title.
 
     The counterpart to validate_fragment, not a duplicate of it: this produces a
-    fragment and validation consumes one. It exists so nobody has to hand-write
-    JSON -- the bot posts the output of this as a ready-to-paste comment, and
-    `new-change` runs it in a local clone. It deliberately writes without
-    validating: the summary it derives from a title is a starting point the author
-    is expected to rewrite, and `check` is what refuses a bad one at the gate.
+    fragment and validation consumes one. It exists so that the fields nobody
+    should hand-write are derived instead -- the type from the title prefix, and
+    a revert's summary from the Revert button's generated title.
+
+    Two callers, one behaviour. CI runs it with --out pointing outside the tree
+    and posts the result as a paste-ready comment; an author can run it with no
+    --out to write the real fragment. It deliberately writes without validating:
+    the summary it derives is a starting point the author is expected to rewrite,
+    and `check` is what refuses a bad one at the gate.
     """
     if args.pr <= 0:
         _err(f"--pr must be the real pull request number, not {args.pr}")
@@ -331,9 +335,11 @@ def cmd_seed(args):
     out = (Path(args.out) if args.out
            else Path(args.changes_dir) / "preview" / f"{args.pr}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists() and not args.force:
+    if out.exists():
+        # Never clobber: this writes a machine guess, and the file it would
+        # overwrite is either an author's own entry or an already-posted template.
         # Non-zero, so a caller cannot mistake "declined" for "wrote it".
-        print(f"exists (use --force to overwrite): {out}", file=sys.stderr)
+        print(f"exists, refusing to overwrite: {out}", file=sys.stderr)
         return 1
     out.write_text(json.dumps(frag, indent=2) + "\n")
     print(str(out))
@@ -626,13 +632,12 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("seed",
-                       help="create a fragment for a PR (usually via new-change helper)")
+                       help="write the fragment for a PR, deriving its fields from the title")
     s.add_argument("--pr", type=int, required=True)
     s.add_argument("--title", required=True)
     s.add_argument("--changes-dir", default=".changes")
     s.add_argument("--out", default="",
                    help="Write here instead of <changes-dir>/preview/<pr>.json.")
-    s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_seed)
 
     c = sub.add_parser("check", help="CI: assert the PR title and its fragment are valid")
