@@ -301,18 +301,17 @@ def render_line_archive(line, groups):
 # these are the only entry points that read argv or write files.
 
 def cmd_seed(args):
-    """Write the fragment a pull request is missing, derived from its title.
+    """Write the template the bot comments with when a fragment is missing.
 
     The counterpart to validate_fragment, not a duplicate of it: this produces a
-    fragment and validation consumes one. It exists so that the fields nobody
-    should hand-write are derived instead -- the type from the title prefix, and
-    a revert's summary from the Revert button's generated title.
+    fragment and validation consumes one. It exists for the two fields a comment
+    cannot state generically -- the type, derived from the title prefix, and a
+    revert's summary, derived from the Revert button's generated title.
 
-    Two callers, one behaviour. CI runs it with --out pointing outside the tree
-    and posts the result as a paste-ready comment; an author can run it with no
-    --out to write the real fragment. It deliberately writes without validating:
-    the summary it derives is a starting point the author is expected to rewrite,
-    and `check` is what refuses a bad one at the gate.
+    The output is never the author's file. It goes to --out, outside the tree the
+    check reads, and the author copies it from the comment. So it writes without
+    validating: the summary is a starting point they are expected to rewrite, and
+    `check` is what refuses a bad one at the gate.
     """
     if args.pr <= 0:
         _err(f"--pr must be the real pull request number, not {args.pr}")
@@ -329,18 +328,8 @@ def cmd_seed(args):
         if not summary.lower().startswith("revert"):
             summary = f"Reverted {summary}"
     frag = {"pr": args.pr, "type": pr_type, "summary": summary, "notes": ""}
-    # The caller that seeds a template writes it outside the directory `check`
-    # reads, so a generated starting point is never mistaken for a fragment the
-    # author committed.
-    out = (Path(args.out) if args.out
-           else Path(args.changes_dir) / "preview" / f"{args.pr}.json")
+    out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
-        # Never clobber: this writes a machine guess, and the file it would
-        # overwrite is either an author's own entry or an already-posted template.
-        # Non-zero, so a caller cannot mistake "declined" for "wrote it".
-        print(f"exists, refusing to overwrite: {out}", file=sys.stderr)
-        return 1
     out.write_text(json.dumps(frag, indent=2) + "\n")
     print(str(out))
     return 0
@@ -632,12 +621,11 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("seed",
-                       help="write the fragment for a PR, deriving its fields from the title")
+                       help="write the template a missing fragment should be filled from")
     s.add_argument("--pr", type=int, required=True)
     s.add_argument("--title", required=True)
-    s.add_argument("--changes-dir", default=".changes")
-    s.add_argument("--out", default="",
-                   help="Write here instead of <changes-dir>/preview/<pr>.json.")
+    s.add_argument("--out", required=True,
+                   help="Where to write it; never inside the changes directory.")
     s.set_defaults(func=cmd_seed)
 
     c = sub.add_parser("check", help="CI: assert the PR title and its fragment are valid")

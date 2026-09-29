@@ -8,10 +8,14 @@ import changelog as cl  # noqa: E402
 
 
 def _seed(tmp_path, pr, title):
-    return cl.main([
-        "seed", "--pr", str(pr), "--title", title,
-        "--changes-dir", str(tmp_path / ".changes"),
-    ])
+    """Seed writes a template, then place it where an author would have put it."""
+    out = tmp_path / "template.json"
+    rc = cl.main(["seed", "--pr", str(pr), "--title", title, "--out", str(out)])
+    if rc == 0:
+        frag = tmp_path / ".changes" / "preview" / f"{pr}.json"
+        frag.parent.mkdir(parents=True, exist_ok=True)
+        frag.write_text(out.read_text())
+    return rc
 
 
 def _render(tmp_path):
@@ -35,8 +39,8 @@ def _rollup(tmp_path, version, date, minor_prs=""):
 
 def test_seed_refuses_a_placeholder_pr(tmp_path):
     assert cl.main(["seed", "--pr", "0", "--title", "feat: x",
-                    "--changes-dir", _changes(tmp_path)]) == 2
-    assert not (tmp_path / ".changes" / "preview" / "0.json").exists()
+                    "--out", str(tmp_path / "t.json")]) == 2
+    assert not (tmp_path / "t.json").exists()
 
 
 def test_seed_writes_fragment(tmp_path):
@@ -56,14 +60,6 @@ def test_seed_no_prefix_becomes_chore(tmp_path):
     d = json.loads((tmp_path / ".changes" / "preview" / "500.json").read_text())
     assert d["type"] == "chore"
     assert d["summary"] == "Just some cleanup"
-
-
-def test_seed_refuses_to_overwrite(tmp_path):
-    _seed(tmp_path, 1, "feat: a")
-    # Non-zero, so a caller cannot mistake "declined" for "wrote it".
-    assert _seed(tmp_path, 1, "feat: b") == 1
-    d = json.loads((tmp_path / ".changes" / "preview" / "1.json").read_text())
-    assert d["summary"] == "a"
 
 
 def test_validate_rejects_missing_fields(tmp_path):

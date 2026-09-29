@@ -57,8 +57,11 @@ replay() {   # mirror the merge onto the docs branch, exactly as CI does
 
 merge_pr() { # merge_pr <days-ago> <pr> <type> <summary> [notes]
   local ago="$1" pr="$2" typ="$3" summary="$4" notes="${5:-}"
+  # Seed writes the template the bot would comment with; the author is the one
+  # who puts it under preview/, so the simulation does that copy itself.
+  mkdir -p .changes/preview
   python3 "$CL" seed --pr "$pr" --title "${typ}: ${summary}" \
-    --changes-dir .changes >/dev/null
+    --out ".changes/preview/${pr}.json" >/dev/null
   if [[ -n "$notes" ]]; then
     python3 - "$pr" "$notes" <<'PY'
 import json, pathlib, sys
