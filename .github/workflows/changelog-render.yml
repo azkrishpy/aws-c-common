@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: azkrishpy/aws-crt-builder
-          ref: change-log
+          ref: pm/4-changelog-job
           path: .crt-builder
 
       - name: Replay merge onto docs, refresh preview
