@@ -18,20 +18,22 @@ import shutil
 import sys
 from pathlib import Path
 
-VALID_TYPES = {"feat", "fix", "doc", "chore", "revert"}
+VALID_TYPES = {"feat", "fix", "chore", "revert"}
 
-# Section order for the rendered file. chore has no row on purpose: it is
-# internal-only, so requiring a fragment would force authors to write text no
-# customer ever reads.
-CATEGORY = {"feat": "Features", "fix": "Fixes", "doc": "Docs",
-            "revert": "Reverts"}
+# Section order. chore has no row: documentation and maintenance are internal,
+# so requiring a fragment would force authors to write text no customer reads.
+CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
+
+# A fragment the ABI check called `minor` renders here instead of its own type
+# section: a consumer may have to change something to take the release.
+BREAKING_SECTION = "Possible Breaking Changes"
 
 # Every accepted type either renders or is chore. Without this, narrowing the
 # type set would silently drop released entries from a regenerated file.
 assert set(CATEGORY) | {"chore"} == VALID_TYPES
 
 TITLE_RE = re.compile(
-    r"^(feat|fix|doc|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
+    r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
 )
 # GitHub's Revert button generates `Revert "<original title> (#<n>)"`, which
 # carries no `<type>:` prefix. Accepting it verbatim means a maintainer using
@@ -81,6 +83,9 @@ def validate_fragment(path):
     u = data.get("url")
     if not isinstance(u, str) or not u.strip():
         errs.append(f"{path}: url must be non-empty string")
+    impact = data.get("impact")
+    if impact is not None and impact != "minor":
+        errs.append(f"{path}: impact, when present, must be \"minor\"")
     notes = data.get("notes", "")
     if not isinstance(notes, str):
         errs.append(f"{path}: notes must be a string")
@@ -120,28 +125,40 @@ def parse_semver(s):
 SENTENCE_END = (".", "!", "?")
 
 
+def pr_link(frag):
+    """`#843` linked to the pull request, so an archived file still resolves."""
+    return f"[#{frag['pr']}]({frag['url']})"
+
+
 def render_entry(frag):
     summary = frag["summary"].strip()
     if not summary.endswith(SENTENCE_END):
         summary += "."
-    line = f"- {summary} (#{frag['pr']})"
-    if frag.get("notes"):
-        indented = "\n  ".join(frag["notes"].splitlines())
-        line += "\n  " + indented
-    return line
+    return f"- {summary} ({pr_link(frag)})"
+
+
+def render_note(frag):
+    """A note is its own entry, led by the pull request it explains."""
+    body = frag["notes"].strip().splitlines()
+    return "\n  ".join([f"- {pr_link(frag)} — {body[0]}", *body[1:]])
+
+
+def _section(heading, entries, render):
+    if not entries:
+        return []
+    return [f"### {heading}", *(render(e) for e in sorted(entries, key=lambda f: f["pr"])), ""]
 
 
 def render_grouped(fragments):
-    """Render visible fragments as `### Category` sections, or '' if none are."""
-    lines = []
+    """Sections in a fixed order, each omitted when it would be empty."""
+    breaking = [f for f in fragments if f.get("impact") == "minor"]
+    lines = _section(BREAKING_SECTION, breaking, render_entry)
     for typ, cat in CATEGORY.items():
-        entries = sorted((f for f in fragments if f["type"] == typ),
-                         key=lambda f: f["pr"])
-        if not entries:
-            continue
-        lines.append(f"### {cat}")
-        lines.extend(render_entry(e) for e in entries)
-        lines.append("")
+        rest = [f for f in fragments
+                if f["type"] == typ and f.get("impact") != "minor"]
+        lines += _section(cat, rest, render_entry)
+    lines += _section("Notes", [f for f in fragments if f.get("notes", "").strip()],
+                      render_note)
     return "\n".join(lines).rstrip() + "\n" if lines else ""
 
 
@@ -201,7 +218,9 @@ def list_releases_in(line_dir):
 def render_release_section(meta, fragments):
     head = f"## [{meta['version']}] — {meta['date']}\n"
     head += f"Highlights: {meta['highlights']}\n\n" if meta.get("highlights") else "\n"
-    return head + render_grouped(fragments)
+    # Every release gets a section, including one that shipped only chores; a
+    # bare header with nothing under it reads as a broken render.
+    return head + (render_grouped(fragments) or "_No customer-facing changes._\n")
 
 
 def _release_sections(release_dirs):
@@ -230,22 +249,32 @@ def audit_released(changes_dir):
     return bool(errs)
 
 
-def render_root_changelog(changes_dir):
-    """Regenerate the whole root CHANGELOG.md content from preview/ + latest/."""
-    body = [
-        "# Changelog",
-        "",
-        "## [Preview]",
-        "",
-        (render_grouped(load_preview(changes_dir)) or "_Nothing yet._\n").rstrip(),
-        "",
-    ]
+def render_root_changelog(changes_dir, preview=True, docs_branch="docs"):
+    """The whole rendered file.
+
+    `preview=True` is the docs-branch shape: it leads with the in-flight block,
+    and something regenerates it on every merge. The release branch gets
+    `preview=False`, because only a release rewrites the file there and a
+    Preview block would sit permanently stale.
+    """
+    body = ["# Changelog", ""]
+    if preview:
+        body += [
+            "## [Preview]",
+            "",
+            (render_grouped(load_preview(changes_dir)) or "_Nothing yet._\n").rstrip(),
+            "",
+        ]
+    else:
+        body += [f"Unreleased changes are rendered on the "
+                 f"[`{docs_branch}`](../../tree/{docs_branch}/CHANGELOG.md) branch.", ""]
     body += _release_sections(list_releases_in(Path(changes_dir) / "latest"))
     frozen = _frozen_lines(changes_dir)
     if frozen:
         body.append("## Earlier releases")
         body.append("")
-        body += [f"- [{d.name}]({d.as_posix()}/CHANGELOG.md)" for d in frozen]
+        rel = Path(changes_dir).name
+        body += [f"- [{d.name}]({rel}/{d.name}/CHANGELOG.md)" for d in frozen]
         body.append("")
     return "\n".join(body).rstrip() + "\n"
 
@@ -276,7 +305,8 @@ def cmd_seed(args):
         summary = re.sub(r"^(feat|fix|chore|revert)(\([^)]+\))?:\s*", "", summary,
                          flags=re.IGNORECASE)
         summary = re.sub(r"\s*\(#\d+\)\s*$", "", summary)
-        summary = f"Reverted {summary}"
+        if not summary.lower().startswith("revert"):
+            summary = f"Reverted {summary}"
     frag = {
         "pr": args.pr,
         "type": typ,
@@ -524,20 +554,27 @@ def _freeze_current_line(changes, latest, current_minor):
     return None
 
 
-def _open_release_dir(changes, latest, new_version, date, highlights):
+def _open_release_dir(changes, latest, new_version, date, highlights, minor_prs):
     """Create latest/<version>/ with _meta.json and move preview fragments in."""
     release_dir = latest / new_version
     release_dir.mkdir(parents=True)
     meta = {"version": new_version, "date": date, "highlights": highlights or ""}
     (release_dir / "_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     for f in (changes / "preview").glob("*.json"):
+        # The ABI verdict lives on the pull request, not in the fragment the
+        # author wrote. Stamp it in as the fragment is released, so every later
+        # re-render of this line reaches the same answer without asking GitHub.
+        data = json.loads(f.read_text())
+        if data.get("pr") in minor_prs:
+            data["impact"] = "minor"
+            f.write_text(json.dumps(data, indent=2) + "\n")
         f.rename(release_dir / f.name)
 
 
 def cmd_render(args):
     if audit_released(args.changes_dir):
         return 2
-    text = render_root_changelog(args.changes_dir)
+    text = render_root_changelog(args.changes_dir, preview=True)
     Path(args.changelog).write_text(text)
     print(f"rendered \u2192 {args.changelog}")
     return 0
@@ -601,8 +638,10 @@ def cmd_rollup(args):
             _err(err)
             return 2
 
-    _open_release_dir(changes, latest, args.version, args.date, args.highlights)
-    Path(args.changelog).write_text(render_root_changelog(changes))
+    _open_release_dir(changes, latest, args.version, args.date, args.highlights,
+                      {int(p) for p in args.minor_prs.split(",") if p.strip()})
+    Path(args.changelog).write_text(
+        render_root_changelog(changes, preview=False, docs_branch=args.docs_branch))
     print(f"rolled up {len(preview)} fragment(s) into {args.version} ({bump})")
     return 0
 
@@ -648,6 +687,11 @@ def main(argv=None):
                    help="Optional; inferred from --version and current latest/ if omitted.")
     u.add_argument("--changes-dir", default=".changes")
     u.add_argument("--changelog", default="CHANGELOG.md")
+    u.add_argument("--docs-branch", default="docs",
+                   help="Branch named in the pointer to the in-flight changelog.")
+    u.add_argument("--minor-prs", default="",
+                   help="Comma-separated PRs the ABI check labelled `minor`; "
+                        "their entries render under Possible Breaking Changes.")
     u.set_defaults(func=cmd_rollup)
 
     args = p.parse_args(argv)

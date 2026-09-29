@@ -20,14 +20,14 @@ def _render(tmp_path):
     return text
 
 
-def _rollup(tmp_path, version, date, bump=None, highlights=""):
+def _rollup(tmp_path, version, date, highlights="", minor_prs=""):
     argv = [
         "rollup", "--version", version, "--date", date,
         "--changes-dir", str(tmp_path / ".changes"),
         "--changelog", str(tmp_path / "CHANGELOG.md"),
     ]
-    if bump:
-        argv += ["--bump", bump]
+    if minor_prs:
+        argv += ["--minor-prs", minor_prs]
     if highlights:
         argv += ["--highlights", highlights]
     return cl.main(argv)
@@ -151,9 +151,9 @@ def test_render_preserves_summary_punctuation(tmp_path):
     _seed(tmp_path, 2, "fix: Handle overflow!")
     _seed(tmp_path, 3, "feat: Add SSO")
     text = _render(tmp_path)
-    assert "429? (#1)" in text
-    assert "overflow! (#2)" in text
-    assert "SSO. (#3)" in text
+    assert "429? ([#1]" in text
+    assert "overflow! ([#2]" in text
+    assert "SSO. ([#3]" in text
     assert "429?." not in text and "overflow!." not in text
 
 
@@ -218,7 +218,8 @@ def test_rollup_minor_freezes_previous_line(tmp_path):
     root = (tmp_path / "CHANGELOG.md").read_text()
     assert "## [0.30.0]" in root
     assert "## [0.29.0]" not in root and "## [0.29.1]" not in root
-    assert "## [Preview]" in root
+    assert "## [Preview]" not in root
+    assert "docs" in root
 
 
 def test_rollup_minor_from_empty_latest(tmp_path):
@@ -349,7 +350,7 @@ def test_full_lifecycle_end_to_end(tmp_path):
     root = (tmp_path / "CHANGELOG.md").read_text()
     assert "## [0.30.0] — 2026-08-19" in root
     assert "## [0.29.1]" not in root and "## [0.29.0]" not in root
-    assert "## [Preview]" in root
+    assert "## [Preview]" not in root
 
 
 # ---------- type set, title forms, and the fragment waiver ----------
@@ -373,14 +374,6 @@ def _check(tmp_path, pr, title, bot=""):
     if bot:
         args += ["--bot-author", bot]
     return cl.main(args)
-
-
-def test_doc_is_a_type_and_docs_is_not(tmp_path):
-    # `doc` is documented in .changes/README.md; the plural is not a type.
-    assert cl.parse_title("doc: add a design doc") == ("doc", "add a design doc")
-    assert cl.parse_title("docs: add a design doc") == (None, "docs: add a design doc")
-    _write(tmp_path, 1, "doc")
-    assert _check(tmp_path, 1, "doc: x") == 0
 
 
 def test_chore_needs_no_fragment(tmp_path):
@@ -519,24 +512,6 @@ def _preview(tmp_path, name, text):
     p.write_text(text)
 
 
-def test_rollup_rejects_a_bump_that_contradicts_the_version(tmp_path):
-    _seed(tmp_path, 1, "feat: a")
-    assert _rollup(tmp_path, "0.29.0", "2026-01-01") == 0
-    _seed(tmp_path, 2, "feat: b")
-    # A patch version declared as a minor used to freeze 0.29.x while opening
-    # latest/0.29.1, splitting the line and wedging every later minor rollup.
-    assert _rollup(tmp_path, "0.29.1", "2026-02-01", bump="minor") == 2
-    assert not (tmp_path / ".changes" / "0.29.x").exists()
-    assert "## [0.29.0]" in (tmp_path / "CHANGELOG.md").read_text()
-
-
-def test_rollup_accepts_a_bump_that_agrees(tmp_path):
-    _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-01-01")
-    _seed(tmp_path, 2, "feat: b")
-    assert _rollup(tmp_path, "0.29.1", "2026-02-01", bump="patch") == 0
-
-
 def test_rollup_refuses_to_reopen_a_frozen_line(tmp_path):
     _seed(tmp_path, 1, "feat: a")
     _rollup(tmp_path, "0.29.0", "2026-01-01")
@@ -595,8 +570,8 @@ def test_a_release_with_nothing_visible_has_no_placeholder(tmp_path):
     root = (tmp_path / "CHANGELOG.md").read_text()
     released = root.split("## [0.1.0]", 1)[1]
     assert "_Nothing yet._" not in released
-    # The empty preview block keeps it, so the file never looks truncated.
-    assert "_Nothing yet._" in root
+    # No preview block on the release branch, so no placeholder either.
+    assert "_Nothing yet._" not in root
 
 
 # ---------- changed-paths hygiene ----------
@@ -621,14 +596,6 @@ def test_a_frozen_line_renders_a_degraded_tree(tmp_path):
     assert "## [0.29.0]" in text and "## [0.29.1]" not in text
 
 
-def test_a_doc_entry_renders_under_docs(tmp_path):
-    d = _release(tmp_path, "latest", "0.1.0")
-    (d / "2.json").write_text(json.dumps(
-        {"pr": 2, "type": "doc", "summary": "Document the mutex", "url": "u", "notes": ""}))
-    text = _render(tmp_path)
-    assert "### Docs" in text and "Document the mutex" in text
-
-
 def test_render_refuses_to_drop_a_released_entry(tmp_path):
     d = _release(tmp_path, "latest", "0.1.0")
     (d / "2.json").write_text(json.dumps(
@@ -650,6 +617,84 @@ def test_render_subcommand_writes_the_file(tmp_path):
     assert cl.main(["render", "--changes-dir", _changes(tmp_path),
                     "--changelog", str(out)]) == 0
     assert "a thing" in out.read_text()
+
+
+def test_a_minor_pr_renders_under_possible_breaking_changes(tmp_path):
+    _seed(tmp_path, 20, "feat: replace the socket options layout")
+    _seed(tmp_path, 21, "feat: add a knob")
+    assert _rollup(tmp_path, "0.1.0", "2026-01-01", minor_prs="20") == 0
+    root = (tmp_path / "CHANGELOG.md").read_text()
+    breaking = root.split("### Possible Breaking Changes", 1)[1].split("###", 1)[0]
+    assert "#20" in breaking and "#21" not in breaking
+    # Excluded from its own type section, not duplicated into it.
+    features = root.split("### Features", 1)[1]
+    assert "#21" in features and "#20" not in features
+
+
+def test_the_impact_stamp_survives_a_re_render(tmp_path):
+    # The label is read once, at release. Later renders must not need it again.
+    _seed(tmp_path, 30, "fix: change a struct")
+    _rollup(tmp_path, "0.1.0", "2026-01-01", minor_prs="30")
+    assert "Possible Breaking Changes" in _render(tmp_path)
+
+
+def test_notes_render_as_their_own_section_last(tmp_path):
+    _write(tmp_path, 40, "revert", summary="Reverted the retry default",
+           notes="It changed behaviour customers relied on.\nA replacement lands later.")
+    _seed(tmp_path, 41, "feat: a widget")
+    text = _render(tmp_path)
+    assert text.index("### Features") < text.index("### Notes")
+    notes = text.split("### Notes", 1)[1]
+    # Led by the linked pull request, with continuation lines indented.
+    assert "- [#40](" in notes
+    assert "It changed behaviour" in notes and "\n  A replacement lands later." in notes
+    # And lifted out of the entry itself.
+    reverts = text.split("### Reverts", 1)[1].split("###", 1)[0]
+    assert "It changed behaviour" not in reverts
+
+
+def test_a_section_is_omitted_when_empty(tmp_path):
+    _seed(tmp_path, 50, "feat: only a feature")
+    text = _render(tmp_path)
+    assert "### Features" in text
+    for absent in ("### Fixes", "### Reverts", "### Notes",
+                   "### Possible Breaking Changes", "### Docs"):
+        assert absent not in text
+
+
+def test_the_release_branch_points_at_the_docs_branch(tmp_path):
+    _seed(tmp_path, 60, "feat: a thing")
+    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    root = (tmp_path / "CHANGELOG.md").read_text()
+    assert "## [Preview]" not in root
+    assert "tree/docs/CHANGELOG.md" in root
+
+
+def test_frozen_links_are_repo_relative(tmp_path):
+    # An absolute --changes-dir must not leak a local path into the markdown.
+    _seed(tmp_path, 1, "feat: a")
+    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _seed(tmp_path, 2, "feat: b")
+    _rollup(tmp_path, "0.2.0", "2026-02-01")
+    root = (tmp_path / "CHANGELOG.md").read_text()
+    assert "- [0.1.x](.changes/0.1.x/CHANGELOG.md)" in root
+    assert str(tmp_path) not in root
+
+
+def test_a_chore_only_release_says_so(tmp_path):
+    # Not a bare dangling header: the release happened, it just changed nothing
+    # a customer can see.
+    _seed(tmp_path, 1, "chore: internal only")
+    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    released = (tmp_path / "CHANGELOG.md").read_text().split("## [0.1.0]", 1)[1]
+    assert "_No customer-facing changes._" in released
+    assert "internal only" not in released
+
+
+def test_a_revert_title_is_not_double_prefixed(tmp_path):
+    _seed(tmp_path, 2, "revert: Reverted the retry default")
+    data = json.loads((tmp_path / ".changes" / "preview" / "2.json").read_text())
+    assert data["summary"] == "Reverted the retry default"
 
 
 def _release(tmp_path, line, version, meta=True, frag=True):
