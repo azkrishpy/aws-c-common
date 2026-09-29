@@ -517,14 +517,11 @@ def _check_version_is_next(changes, new_tuple, new_version):
     for frozen in _frozen_lines(changes):
         # Reopening a frozen line would split it: its snapshot is already
         # written and the root changelog only ever renders latest/.
-        if frozen.name == f"{new_tuple[0]}.{new_tuple[1]}.x":
+        line = tuple(int(x) for x in MINOR_LINE_RE.match(frozen.name).groups())
+        if new_tuple[:2] == line:
             return f"{new_version} belongs to {frozen.name}/, which is already frozen"
-        highest = _latest_version_in_line(frozen)
-        if highest is not None and new_tuple <= highest:
-            return (
-                f"{new_version} is not newer than frozen line's latest "
-                f"{fmt_semver(highest)} in {frozen.name}/"
-            )
+        if new_tuple[:2] < line:
+            return f"{new_version} is older than the frozen line {frozen.name}/"
     return None
 
 
