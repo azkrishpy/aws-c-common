@@ -72,13 +72,11 @@ def run(*args):
     if r.returncode != 0:
         sys.stderr.write(r.stderr)
         raise SystemExit(f"changelog.py {args[0]} failed with {r.returncode}")
-    return r
 
 
 def main():
     root = pathlib.Path(sys.argv[1]).resolve()
     changes, changelog = root / ".changes", root / "CHANGELOG.md"
-    (changes / "preview").mkdir(parents=True, exist_ok=True)
 
     pr = 100
     for version, highlights, entries in HISTORY:

@@ -285,7 +285,8 @@ def render_frozen_line(line_dir):
     if not releases:
         return "# Changelog\n"
     M, N, _ = parse_semver(releases[0].name)
-    body = [f"# Changelog — {M}.{N}.x", ""]
+    body = [f"# Changelog — {M}.{N}.x", "",
+            "Current releases are in the [top-level changelog](../../CHANGELOG.md).", ""]
     body += _release_sections(releases)
     return "\n".join(body).rstrip() + "\n"
 
@@ -624,14 +625,6 @@ def cmd_rollup(args):
 
     current = v[:2] if (v := _latest_version_in_line(latest)) else None
     bump = _infer_bump(current, new_tuple)
-    if args.bump and args.bump != bump:
-        # The version decides; an explicit --bump is only a cross-check. Acting
-        # on a contradictory one freezes the active line under its own name,
-        # which wedges every later minor rollup with no way back.
-        _err(f"--bump {args.bump} contradicts --version {args.version}, which is a "
-             f"{bump} bump relative to latest/")
-        return 2
-
     if bump in ("minor", "major") and current is not None:
         err = _freeze_current_line(changes, latest, current)
         if err:
@@ -683,8 +676,6 @@ def main(argv=None):
     u.add_argument("--version", required=True)
     u.add_argument("--date", required=True)
     u.add_argument("--highlights", default="")
-    u.add_argument("--bump", choices=["patch", "minor", "major"],
-                   help="Optional; inferred from --version and current latest/ if omitted.")
     u.add_argument("--changes-dir", default=".changes")
     u.add_argument("--changelog", default="CHANGELOG.md")
     u.add_argument("--docs-branch", default="docs",
