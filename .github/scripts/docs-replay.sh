@@ -64,7 +64,13 @@ fi
 # touched fragments, and it self-heals drift. A no-op render amends nothing.
 python3 "${CHANGELOG_PY}" render
 git add CHANGELOG.md
-if ! git diff --cached --quiet; then
+if git diff --cached --quiet HEAD~1; then
+  # The replay reproduced the tree already on this branch. That happens when the
+  # commit is replayed twice: the CHANGELOG.md conflict resolves to the same
+  # content, so committing would leave a duplicate. Drop it instead.
+  echo "${TRIGGER_SHA} changed nothing on ${DOCS_BRANCH}; dropping the replay"
+  git reset --hard -q HEAD~1
+elif ! git diff --cached --quiet; then
   git commit --amend --no-edit
 fi
 
