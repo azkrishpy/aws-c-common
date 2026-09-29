@@ -8,6 +8,10 @@ Reports only what it measures. For comparison, measured from the GitHub API:
 aws-sdk-java-v2 keeps 1855 files / 3.83 MB under .changes (one JSON per released
 version, retained forever); aws-sdk-go-v2 keeps 1 (released fragments deleted).
 
+Here a released fragment lives in released/ until its minor line closes, at which
+point the line collapses to one .md -- so the steady state is "one file per open
+pull request, plus one per minor line ever released".
+
 Writes nothing outside a scratch directory.
 """
 import json
@@ -20,7 +24,8 @@ import tempfile
 HERE = pathlib.Path(__file__).resolve().parent
 CHANGELOG_PY = HERE / "changelog.py"
 
-# (minor, patch count) -- aws-c-common's real distribution, oldest first.
+# (minor, patch count) -- aws-c-common's real distribution, oldest first. Run as
+# 1.x upward, since nothing before 1.0.0 is in the changelog.
 HISTORY = [(1, 5), (2, 8), (3, 16), (4, 69), (5, 10), (6, 21), (7, 13),
            (8, 24), (9, 32), (10, 4), (11, 2), (12, 3), (13, 4), (14, 2)]
 
@@ -66,14 +71,14 @@ def main():
                     "url": f"https://github.com/azkrishpy/aws-c-common/pull/{pr}",
                     "notes": "",
                 }, indent=2) + "\n")
-            sh("rollup", "--version", f"0.{minor}.{patch}",
+            sh("rollup", "--version", f"1.{minor}.{patch}",
                "--date", "2026-01-01", "--changes-dir", str(changes),
                "--changelog", str(changelog))
             releases += 1
 
     ours = tree_cost(changes)
     root = changelog.read_text()
-    earlier = root.count("- [0.")
+    earlier = root.count("- [1.")
 
     print(f"replayed {releases} releases across {len(HISTORY)} minor lines, "
           f"{pr} PRs ({PRS_PER_RELEASE} per release)\n")
@@ -83,7 +88,7 @@ def main():
     print(f"{'bytes':22} {ours['bytes']:>8,}")
     print(f"\nroot CHANGELOG.md: {len(root.splitlines())} lines, "
           f"{earlier} 'Earlier releases' links")
-    print(f"frozen snapshots: {len(list(changes.glob('*.x/CHANGELOG.md')))}")
+    print(f"archived lines: {len(list(changes.glob('*.x.md')))}")
     shutil.rmtree(work)
 
 

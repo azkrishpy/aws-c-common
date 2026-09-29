@@ -20,7 +20,7 @@ def _render(tmp_path):
     return text
 
 
-def _rollup(tmp_path, version, date, highlights="", minor_prs=""):
+def _rollup(tmp_path, version, date, minor_prs=""):
     argv = [
         "rollup", "--version", version, "--date", date,
         "--changes-dir", str(tmp_path / ".changes"),
@@ -28,8 +28,6 @@ def _rollup(tmp_path, version, date, highlights="", minor_prs=""):
     ]
     if minor_prs:
         argv += ["--minor-prs", minor_prs]
-    if highlights:
-        argv += ["--highlights", highlights]
     return cl.main(argv)
 
 
@@ -159,93 +157,77 @@ def test_render_preserves_summary_punctuation(tmp_path):
 
 # ---------- rollup: patch ----------
 
-def test_rollup_patch_moves_fragments_and_creates_meta(tmp_path):
-    _seed(tmp_path, 1, "feat: initial")
-    _seed(tmp_path, 2, "chore: bump")
-    assert _rollup(tmp_path, "0.29.0", "2026-08-01") == 0
-    assert list((tmp_path / ".changes" / "preview").glob("*.json")) == []
-    rel = tmp_path / ".changes" / "latest" / "0.29.0"
-    meta = json.loads((rel / "_meta.json").read_text())
-    assert meta["version"] == "0.29.0" and meta["date"] == "2026-08-01"
-    assert {p.name for p in rel.glob("*.json") if p.name != "_meta.json"} == {"1.json", "2.json"}
-
-
 def test_rollup_patch_accretes_into_same_line(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
+    _rollup(tmp_path, "2.0.0", "2026-08-01")
     _seed(tmp_path, 2, "fix: b")
-    _rollup(tmp_path, "0.29.1", "2026-08-15")
-    latest = tmp_path / ".changes" / "latest"
-    assert (latest / "0.29.0").is_dir() and (latest / "0.29.1").is_dir()
-    assert not (tmp_path / ".changes" / "0.29.x").exists()
+    _rollup(tmp_path, "2.0.1", "2026-08-15")
+    released = tmp_path / ".changes" / "released"
+    assert {p.name for p in released.glob("*.json")} == {"1.json", "2.json"}
+    assert not (tmp_path / ".changes" / "2.0.x.md").exists()
     text = (tmp_path / "CHANGELOG.md").read_text()
-    assert "## [0.29.1] — 2026-08-15" in text
-    assert "## [0.29.0] — 2026-08-01" in text
-    assert text.index("[0.29.1]") < text.index("[0.29.0]")
+    assert "## [2.0.1] — 2026-08-15" in text
+    assert "## [2.0.0] — 2026-08-01" in text
+    assert text.index("[2.0.1]") < text.index("[2.0.0]")
 
 
 def test_rollup_with_no_fragments_still_releases(tmp_path):
     # A patch of nothing but chores is routine; failing here would fail the
-    # release job after it has already tagged.
+    # release job after it has already tagged. It renders no section, because
+    # there is nothing customer-facing to put under one.
     (tmp_path / ".changes" / "preview").mkdir(parents=True)
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 0
-    assert (tmp_path / ".changes" / "latest" / "0.1.0" / "_meta.json").exists()
-    assert "## [0.1.0]" in (tmp_path / "CHANGELOG.md").read_text()
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 0
+    assert "## [1.0.0]" not in (tmp_path / "CHANGELOG.md").read_text()
 
 
 # ---------- rollup: minor / freeze ----------
 
 def test_rollup_minor_freezes_previous_line(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
+    _rollup(tmp_path, "2.0.0", "2026-08-01")
     _seed(tmp_path, 2, "fix: b")
-    _rollup(tmp_path, "0.29.1", "2026-08-15")
+    _rollup(tmp_path, "2.0.1", "2026-08-15")
     _seed(tmp_path, 3, "feat: tcp_nodelay")
-    _rollup(tmp_path, "0.30.0", "2026-08-19")
+    _rollup(tmp_path, "2.1.0", "2026-08-19")
 
     changes = tmp_path / ".changes"
-    assert (changes / "latest" / "0.30.0").is_dir()
-    assert not (changes / "latest" / "0.29.0").exists()
-    # Pruned at freeze: the snapshot is the archive, git keeps the fragments.
-    assert not (changes / "0.29.x" / "0.29.0").exists()
-    assert sorted(p.name for p in (changes / "0.29.x").iterdir()) == ["CHANGELOG.md"]
-    frozen = (changes / "0.29.x" / "CHANGELOG.md").read_text()
+    # Pruned at freeze: the archive is the record, git keeps the fragments.
+    assert {p.name for p in (changes / "released").glob("*.json")} == {"3.json"}
+    frozen = (changes / "2.0.x.md").read_text()
     assert "## [Preview]" not in frozen
-    assert frozen.startswith("# Changelog — 0.29.x")
-    assert "## [0.29.1]" in frozen and "## [0.29.0]" in frozen
-    assert "## [0.30.0]" not in frozen
+    assert frozen.startswith("# Changelog — 2.0.x")
+    assert "## [2.0.1]" in frozen and "## [2.0.0]" in frozen
+    assert "## [2.1.0]" not in frozen
 
     root = (tmp_path / "CHANGELOG.md").read_text()
-    assert "## [0.30.0]" in root
-    assert "## [0.29.0]" not in root and "## [0.29.1]" not in root
+    assert "## [2.1.0]" in root
+    assert "## [2.0.0]" not in root and "## [2.0.1]" not in root
     assert "## [Preview]" not in root
     assert "docs" in root
 
 
-def test_rollup_minor_from_empty_latest(tmp_path):
+def test_the_first_release_archives_nothing(tmp_path):
     _seed(tmp_path, 1, "feat: initial")
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 0
-    assert (tmp_path / ".changes" / "latest" / "0.1.0").is_dir()
-    assert [p for p in (tmp_path / ".changes").iterdir()
-            if p.is_dir() and p.name.endswith(".x")] == []
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 0
+    assert cl.releases(tmp_path / ".changes")[0][0] == "1.0.0"
+    assert cl.frozen_lines(tmp_path / ".changes") == []
 
 
-def test_rollup_major_freezes_current_minor_line(tmp_path):
+def test_rollup_major_archives_the_current_minor_line(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
+    _rollup(tmp_path, "2.0.0", "2026-08-01")
     _seed(tmp_path, 2, "feat: big change")
-    _rollup(tmp_path, "1.0.0", "2027-01-01")
+    _rollup(tmp_path, "3.0.0", "2027-01-01")
     changes = tmp_path / ".changes"
-    assert (changes / "0.29.x" / "CHANGELOG.md").exists()
-    assert not (changes / "0.29.x" / "0.29.0").exists()
-    assert (changes / "latest" / "1.0.0").is_dir()
+    assert (changes / "2.0.x.md").exists()
+    assert {p.name for p in (changes / "released").glob("*.json")} == {"2.json"}
 
 
 def test_rollup_rejects_duplicate_version(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
+    _rollup(tmp_path, "2.0.0", "2026-08-01")
     _seed(tmp_path, 2, "fix: b")
-    assert _rollup(tmp_path, "0.29.0", "2026-08-02") == 2
+    assert _rollup(tmp_path, "2.0.0", "2026-08-02") == 2
 
 
 def test_rollup_bad_semver_rejected(tmp_path):
@@ -255,14 +237,14 @@ def test_rollup_bad_semver_rejected(tmp_path):
 
 def test_rollup_bad_date_rejected(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    assert _rollup(tmp_path, "0.1.0", "not-a-date") == 2
+    assert _rollup(tmp_path, "1.0.0", "not-a-date") == 2
 
 
 def test_rollup_rejects_downgrade_in_latest(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.1", "2026-08-15")
+    _rollup(tmp_path, "2.0.1", "2026-08-15")
     _seed(tmp_path, 2, "fix: b")
-    assert _rollup(tmp_path, "0.29.0", "2026-08-20") == 2
+    assert _rollup(tmp_path, "2.0.0", "2026-08-20") == 2
 
 
 # ---------- resilience ----------
@@ -288,30 +270,6 @@ def test_render_skips_schema_invalid_fragment(tmp_path, capsys):
     assert "WARN" in err
 
 
-def test_render_skips_release_with_malformed_meta(tmp_path, capsys):
-    _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
-    (tmp_path / ".changes" / "latest" / "0.29.0" / "_meta.json").write_text(
-        '{"version": "0.29.0"}'
-    )
-    text = _render(tmp_path)
-    assert "## [0.29.0]" not in text
-    err = capsys.readouterr().err
-    assert "WARN" in err
-
-
-def test_rollup_recovers_from_half_freeze(tmp_path):
-    _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-08-01")
-    latest = tmp_path / ".changes" / "latest"
-    frozen = tmp_path / ".changes" / "0.29.x"
-    latest.rename(frozen)
-    latest.mkdir()
-    _seed(tmp_path, 2, "feat: b")
-    assert _rollup(tmp_path, "0.30.0", "2026-08-19") == 0
-    assert (frozen / "CHANGELOG.md").exists()
-
-
 # ---------- list smoke ----------
 
 # ---------- full lifecycle ----------
@@ -320,7 +278,7 @@ def test_full_lifecycle_end_to_end(tmp_path):
     _seed(tmp_path, 843, "feat: SSO sign-in")
     _seed(tmp_path, 850, "fix: idempotency token drop on 429")
     _seed(tmp_path, 858, "chore: bump aws-lc")
-    _rollup(tmp_path, "0.29.0", "2026-08-01", highlights="SSO sign-in")
+    _rollup(tmp_path, "2.0.0", "2026-08-01")
 
     _seed(tmp_path, 867, "fix: leaking fd on socket teardown")
     _write(tmp_path, 870, "revert", summary="Reverted the retry-default change",
@@ -332,24 +290,24 @@ def test_full_lifecycle_end_to_end(tmp_path):
     assert "## [Preview]" in root
     assert "#867" in root and "#870" in root and "#872" in root
 
-    _rollup(tmp_path, "0.29.1", "2026-08-15")
+    _rollup(tmp_path, "2.0.1", "2026-08-15")
     root = (tmp_path / "CHANGELOG.md").read_text()
-    assert "## [0.29.1] — 2026-08-15" in root
-    assert "## [0.29.0] — 2026-08-01" in root
-    assert not (tmp_path / ".changes" / "0.29.x").exists()
+    assert "## [2.0.1] — 2026-08-15" in root
+    assert "## [2.0.0] — 2026-08-01" in root
+    assert not (tmp_path / ".changes" / "2.0.x.md").exists()
 
     _seed(tmp_path, 875, "fix: retry backoff off-by-one")
     _seed(tmp_path, 878, "feat: add tcp_nodelay to socket options")
-    _rollup(tmp_path, "0.30.0", "2026-08-19")
+    _rollup(tmp_path, "2.1.0", "2026-08-19")
 
-    frozen = (tmp_path / ".changes" / "0.29.x" / "CHANGELOG.md").read_text()
-    assert frozen.startswith("# Changelog — 0.29.x")
-    assert "## [0.29.1]" in frozen and "## [0.29.0]" in frozen
+    frozen = (tmp_path / ".changes" / "2.0.x.md").read_text()
+    assert frozen.startswith("# Changelog — 2.0.x")
+    assert "## [2.0.1]" in frozen and "## [2.0.0]" in frozen
     assert "## [Preview]" not in frozen
 
     root = (tmp_path / "CHANGELOG.md").read_text()
-    assert "## [0.30.0] — 2026-08-19" in root
-    assert "## [0.29.1]" not in root and "## [0.29.0]" not in root
+    assert "## [2.1.0] — 2026-08-19" in root
+    assert "## [2.0.1]" not in root and "## [2.0.0]" not in root
     assert "## [Preview]" not in root
 
 
@@ -361,11 +319,13 @@ def _changes(tmp_path):
     return str(tmp_path / ".changes")
 
 
-def _write(tmp_path, pr, typ, summary="s", notes=""):
+def _write(tmp_path, pr, typ, summary="s", notes="", **over):
     _changes(tmp_path)
-    (tmp_path / ".changes" / "preview" / f"{pr}.json").write_text(json.dumps(
-        {"pr": pr, "type": typ, "summary": summary,
-         "url": f"https://x/pull/{pr}", "notes": notes}) + "\n")
+    frag = {"pr": pr, "type": typ, "summary": summary,
+            "url": f"https://x/pull/{pr}", "notes": notes}
+    frag.update(over)
+    (tmp_path / ".changes" / "preview" / f"{pr}.json").write_text(
+        json.dumps(frag) + "\n")
 
 
 def _check(tmp_path, pr, title, bot=""):
@@ -514,12 +474,12 @@ def _preview(tmp_path, name, text):
 
 def test_rollup_refuses_to_reopen_a_frozen_line(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.29.0", "2026-01-01")
+    _rollup(tmp_path, "2.0.0", "2026-01-01")
     _seed(tmp_path, 2, "feat: b")
-    _rollup(tmp_path, "0.30.0", "2026-02-01")
+    _rollup(tmp_path, "2.1.0", "2026-02-01")
     _seed(tmp_path, 3, "fix: backport")
-    assert _rollup(tmp_path, "0.29.1", "2026-03-01") == 2
-    assert not (tmp_path / ".changes" / "latest" / "0.29.1").exists()
+    assert _rollup(tmp_path, "2.0.1", "2026-03-01") == 2
+    assert not (tmp_path / ".changes" / "latest" / "2.0.1").exists()
 
 
 # ---------- a release never silently drops a fragment ----------
@@ -527,51 +487,52 @@ def test_rollup_refuses_to_reopen_a_frozen_line(tmp_path):
 def test_rollup_refuses_a_malformed_fragment(tmp_path):
     _seed(tmp_path, 1, "feat: a")
     _preview(tmp_path, "2.json", "{ not json")
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 2
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
     assert (tmp_path / ".changes" / "preview" / "1.json").exists()
-    assert not (tmp_path / ".changes" / "latest" / "0.1.0").exists()
+    assert not (tmp_path / ".changes" / "latest" / "1.0.0").exists()
 
 
 def test_rollup_refuses_a_schema_invalid_fragment(tmp_path):
     _seed(tmp_path, 1, "feat: a")
     _preview(tmp_path, "2.json", json.dumps(
         {"pr": "two", "type": "feat", "summary": "", "url": "u"}))
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 2
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
 
 
 def test_rollup_refuses_a_fragment_whose_name_and_pr_disagree(tmp_path):
     # Would render the entry under someone else's number.
     _preview(tmp_path, "1.json", json.dumps(
         {"pr": 999, "type": "feat", "summary": "Mislabelled", "url": "u", "notes": ""}))
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 2
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
 
 
 def test_rollup_reports_an_all_invalid_preview_as_invalid_not_empty(tmp_path):
     _preview(tmp_path, "1.json", "{ not json")
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01") == 2
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
 
 
 # ---------- one hiding policy, one placeholder ----------
 
-def test_frozen_line_hides_chores_like_the_root_does(tmp_path):
+def test_an_archive_hides_chores_like_the_root_does(tmp_path):
     _seed(tmp_path, 1, "feat: visible")
     _seed(tmp_path, 2, "chore: internal only")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
     _seed(tmp_path, 3, "feat: next line")
-    _rollup(tmp_path, "0.2.0", "2026-02-01")
-    frozen = (tmp_path / ".changes" / "0.1.x" / "CHANGELOG.md").read_text()
+    _rollup(tmp_path, "1.1.0", "2026-02-01")
+    frozen = (tmp_path / ".changes" / "1.0.x.md").read_text()
     assert "visible" in frozen
     assert "internal only" not in frozen
 
 
-def test_a_release_with_nothing_visible_has_no_placeholder(tmp_path):
+def test_a_release_with_nothing_visible_renders_no_section(tmp_path):
+    # A bare header with nothing under it reads as a broken file, so the release
+    # simply does not appear -- the fragment is kept, it just renders nowhere.
     _seed(tmp_path, 1, "chore: internal only")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
     root = (tmp_path / "CHANGELOG.md").read_text()
-    released = root.split("## [0.1.0]", 1)[1]
-    assert "_Nothing yet._" not in released
-    # No preview block on the release branch, so no placeholder either.
+    assert "## [1.0.0]" not in root
     assert "_Nothing yet._" not in root
+    assert (tmp_path / ".changes" / "released" / "1.json").exists()
 
 
 # ---------- changed-paths hygiene ----------
@@ -586,29 +547,17 @@ def test_changes_outside_the_changes_dir_are_ignored(tmp_path):
 
 # ---------- guards that only a hand-mangled tree can reach ----------
 
-def test_a_frozen_line_renders_a_degraded_tree(tmp_path):
-    line = tmp_path / ".changes" / "0.29.x"
-    line.mkdir(parents=True)
-    assert cl.render_frozen_line(line) == "# Changelog\n"
-    _release(tmp_path, "0.29.x", "0.29.0")
-    _release(tmp_path, "0.29.x", "0.29.1", meta=False)
-    text = cl.render_frozen_line(line)
-    assert "## [0.29.0]" in text and "## [0.29.1]" not in text
-
-
 def test_render_refuses_to_drop_a_released_entry(tmp_path):
-    d = _release(tmp_path, "latest", "0.1.0")
-    (d / "2.json").write_text(json.dumps(
-        {"pr": 2, "type": "bogus", "summary": "s", "url": "u", "notes": ""}))
+    _released(tmp_path, 1, "1.0.0")
+    _released(tmp_path, 2, "1.0.0", type="bogus")
     assert cl.main(["render", "--changes-dir", _changes(tmp_path),
                     "--changelog", str(tmp_path / "CHANGELOG.md")]) == 2
 
 
 def test_rollup_refuses_to_drop_a_released_entry(tmp_path):
-    d = _release(tmp_path, "latest", "0.1.0")
-    (d / "2.json").write_text(json.dumps(
-        {"pr": 2, "type": "bogus", "summary": "s", "url": "u", "notes": ""}))
-    assert _rollup(tmp_path, "0.2.0", "2026-01-01") == 2
+    _released(tmp_path, 1, "1.0.0")
+    _released(tmp_path, 2, "1.0.0", type="bogus")
+    assert _rollup(tmp_path, "1.1.0", "2026-01-01") == 2
 
 
 def test_render_subcommand_writes_the_file(tmp_path):
@@ -622,7 +571,7 @@ def test_render_subcommand_writes_the_file(tmp_path):
 def test_a_minor_pr_renders_under_possible_breaking_changes(tmp_path):
     _seed(tmp_path, 20, "feat: replace the socket options layout")
     _seed(tmp_path, 21, "feat: add a knob")
-    assert _rollup(tmp_path, "0.1.0", "2026-01-01", minor_prs="20") == 0
+    assert _rollup(tmp_path, "1.0.0", "2026-01-01", minor_prs="20") == 0
     root = (tmp_path / "CHANGELOG.md").read_text()
     breaking = root.split("### Possible Breaking Changes", 1)[1].split("###", 1)[0]
     assert "#20" in breaking and "#21" not in breaking
@@ -634,7 +583,7 @@ def test_a_minor_pr_renders_under_possible_breaking_changes(tmp_path):
 def test_the_impact_stamp_survives_a_re_render(tmp_path):
     # The label is read once, at release. Later renders must not need it again.
     _seed(tmp_path, 30, "fix: change a struct")
-    _rollup(tmp_path, "0.1.0", "2026-01-01", minor_prs="30")
+    _rollup(tmp_path, "1.0.0", "2026-01-01", minor_prs="30")
     assert "Possible Breaking Changes" in _render(tmp_path)
 
 
@@ -664,31 +613,21 @@ def test_a_section_is_omitted_when_empty(tmp_path):
 
 def test_the_release_branch_points_at_the_docs_branch(tmp_path):
     _seed(tmp_path, 60, "feat: a thing")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
     root = (tmp_path / "CHANGELOG.md").read_text()
     assert "## [Preview]" not in root
     assert "tree/docs/CHANGELOG.md" in root
 
 
-def test_frozen_links_are_repo_relative(tmp_path):
+def test_archive_links_are_repo_relative(tmp_path):
     # An absolute --changes-dir must not leak a local path into the markdown.
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
     _seed(tmp_path, 2, "feat: b")
-    _rollup(tmp_path, "0.2.0", "2026-02-01")
+    _rollup(tmp_path, "1.1.0", "2026-02-01")
     root = (tmp_path / "CHANGELOG.md").read_text()
-    assert "- [0.1.x](.changes/0.1.x/CHANGELOG.md)" in root
+    assert "- [1.0.x](.changes/1.0.x.md)" in root
     assert str(tmp_path) not in root
-
-
-def test_a_chore_only_release_says_so(tmp_path):
-    # Not a bare dangling header: the release happened, it just changed nothing
-    # a customer can see.
-    _seed(tmp_path, 1, "chore: internal only")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
-    released = (tmp_path / "CHANGELOG.md").read_text().split("## [0.1.0]", 1)[1]
-    assert "_No customer-facing changes._" in released
-    assert "internal only" not in released
 
 
 def test_a_revert_title_is_not_double_prefixed(tmp_path):
@@ -700,14 +639,14 @@ def test_a_revert_title_is_not_double_prefixed(tmp_path):
 def test_the_docs_pointer_is_only_linked_when_it_resolves(tmp_path):
     # ../../tree/<branch>/ reaches the repo root only for a one-segment branch.
     _seed(tmp_path, 1, "feat: a")
-    assert cl.main(["rollup", "--version", "0.1.0", "--date", "2026-01-01",
+    assert cl.main(["rollup", "--version", "1.0.0", "--date", "2026-01-01",
                     "--changes-dir", _changes(tmp_path),
                     "--changelog", str(tmp_path / "a.md"),
                     "--docs-branch", "docs"]) == 0
     assert "(../../tree/docs/CHANGELOG.md)" in (tmp_path / "a.md").read_text()
 
     _seed(tmp_path, 2, "feat: b")
-    assert cl.main(["rollup", "--version", "0.2.0", "--date", "2026-02-01",
+    assert cl.main(["rollup", "--version", "1.1.0", "--date", "2026-02-01",
                     "--changes-dir", _changes(tmp_path),
                     "--changelog", str(tmp_path / "b.md"),
                     "--docs-branch", "team/docs"]) == 0
@@ -715,51 +654,38 @@ def test_the_docs_pointer_is_only_linked_when_it_resolves(tmp_path):
     assert "`team/docs` branch" in text and "../../tree/team/docs" not in text
 
 
-def _release(tmp_path, line, version, meta=True, frag=True):
-    d = tmp_path / ".changes" / line / version
+def _released(tmp_path, pr, version, date="2026-01-01", **over):
+    """Write one already-released fragment, as a rollup would have stamped it."""
+    d = tmp_path / ".changes" / "released"
     d.mkdir(parents=True, exist_ok=True)
-    if meta:
-        (d / "_meta.json").write_text(json.dumps({"version": version, "date": "2026-01-01"}))
-    if frag:
-        (d / "1.json").write_text(json.dumps(
-            {"pr": 1, "type": "feat", "summary": "A", "url": "u", "notes": ""}))
-    return d
+    frag = {"pr": pr, "type": "feat", "summary": "A", "url": "u", "notes": "",
+            "version": version, "date": date}
+    frag.update(over)
+    p = d / f"{pr}.json"
+    p.write_text(json.dumps(frag))
+    return p
 
 
-def test_rollup_refuses_a_version_belonging_to_a_frozen_line(tmp_path):
-    # latest/ empty beside a complete frozen line: reopening 0.29.x here would
-    # split it, since the root changelog only ever renders latest/.
-    _release(tmp_path, "0.29.x", "0.29.0")
-    (tmp_path / ".changes" / "0.29.x" / "CHANGELOG.md").write_text("# Changelog — 0.29.x\n")
+def test_rollup_refuses_a_version_belonging_to_an_archived_line(tmp_path):
+    # released/ empty beside an archive: reopening 2.0.x would split the line,
+    # since the root changelog only renders released/.
+    (tmp_path / ".changes").mkdir(parents=True)
+    (tmp_path / ".changes" / "2.0.x.md").write_text("# Changelog — 2.0.x\n")
     _seed(tmp_path, 2, "fix: backport")
-    assert _rollup(tmp_path, "0.29.1", "2026-02-01") == 2
+    assert _rollup(tmp_path, "2.0.1", "2026-02-01") == 2
 
 
-def test_rollup_refuses_a_version_older_than_a_frozen_line(tmp_path):
-    _release(tmp_path, "0.29.x", "0.29.5")
-    (tmp_path / ".changes" / "0.29.x" / "CHANGELOG.md").write_text("# Changelog — 0.29.x\n")
+def test_rollup_refuses_a_version_older_than_an_archived_line(tmp_path):
+    (tmp_path / ".changes").mkdir(parents=True)
+    (tmp_path / ".changes" / "2.0.x.md").write_text("# Changelog — 2.0.x\n")
     _seed(tmp_path, 2, "fix: b")
-    assert _rollup(tmp_path, "0.28.9", "2026-02-01") == 2
-
-
-def test_rollup_refuses_when_the_freeze_target_already_exists(tmp_path):
-    _release(tmp_path, "latest", "0.29.0")
-    frozen = tmp_path / ".changes" / "0.29.x"
-    frozen.mkdir(parents=True)
-    (frozen / "CHANGELOG.md").write_text("# Changelog — 0.29.x\n")
-    _seed(tmp_path, 2, "feat: b")
-    assert _rollup(tmp_path, "0.30.0", "2026-02-01") == 2
+    assert _rollup(tmp_path, "1.9.9", "2026-02-01") == 2
 
 
 # ---------- degraded trees render rather than crash ----------
 
 def test_render_on_a_tree_with_no_changes_dir(tmp_path):
     assert "## [Preview]" in _render(tmp_path)
-
-
-def test_render_skips_a_release_with_no_meta(tmp_path):
-    _release(tmp_path, "latest", "0.1.0", meta=False)
-    assert "## [0.1.0]" not in _render(tmp_path)
 
 
 def test_validate_rejects_malformed_json(tmp_path):
@@ -772,19 +698,6 @@ def test_validate_rejects_non_string_notes(tmp_path):
     p = tmp_path / "x.json"
     p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "s", "url": "u", "notes": 7}))
     assert cl.validate_fragment(p)
-
-
-def test_render_skips_a_release_whose_meta_version_is_not_semver(tmp_path):
-    d = _release(tmp_path, "latest", "0.1.0")
-    (d / "_meta.json").write_text(json.dumps({"version": "one", "date": "2026-01-01"}))
-    assert "## [" in _render(tmp_path)  # preview heading only
-    assert "## [0.1.0]" not in _render(tmp_path)
-
-
-def test_render_skips_a_release_whose_meta_is_not_json(tmp_path):
-    d = _release(tmp_path, "latest", "0.1.0")
-    (d / "_meta.json").write_text("{ not json")
-    assert "## [0.1.0]" not in _render(tmp_path)
 
 
 # ---------- an entry must be attributable and, for a revert, explained ----------
@@ -818,13 +731,82 @@ def test_seeding_a_revert_drops_the_original_prefix_and_number(tmp_path):
     assert d["summary"] == "Reverted add SSO sign-in"
 
 
-def test_the_root_changelog_links_frozen_lines(tmp_path):
+def test_the_root_changelog_links_archived_lines(tmp_path):
     _seed(tmp_path, 1, "feat: a")
-    _rollup(tmp_path, "0.1.0", "2026-01-01")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
     _seed(tmp_path, 2, "feat: b")
-    _rollup(tmp_path, "0.2.0", "2026-02-01")
+    _rollup(tmp_path, "1.1.0", "2026-02-01")
     root = (tmp_path / "CHANGELOG.md").read_text()
     assert "## Earlier releases" in root
-    assert "0.1.x/CHANGELOG.md" in root
+    assert "1.0.x.md" in root
 
 
+def test_rollup_stamps_and_moves_fragments(tmp_path):
+    _seed(tmp_path, 1, "feat: initial")
+    _seed(tmp_path, 2, "chore: bump")
+    assert _rollup(tmp_path, "1.0.0", "2026-08-01") == 0
+    assert list((tmp_path / ".changes" / "preview").glob("*.json")) == []
+    released = tmp_path / ".changes" / "released"
+    assert {p.name for p in released.glob("*.json")} == {"1.json", "2.json"}
+    data = json.loads((released / "1.json").read_text())
+    # The version and date live on the fragment; there is no side file.
+    assert data["version"] == "1.0.0" and data["date"] == "2026-08-01"
+
+
+def test_rollup_refuses_a_version_before_the_first_changelogged_one(tmp_path):
+    # Everything before 1.0.0 shipped without fragments, so rolling one up
+    # would publish a release whose entries do not exist.
+    _seed(tmp_path, 1, "feat: a")
+    assert _rollup(tmp_path, "0.9.9", "2026-01-01") == 2
+    assert not (tmp_path / "CHANGELOG.md").exists()
+
+
+def test_rollup_refuses_a_second_fragment_for_a_released_pull_request(tmp_path):
+    # Two entries for one pull request in two releases: whichever is stale keeps
+    # rendering, because a re-render trusts what is on disk.
+    _released(tmp_path, 7, "1.0.0")
+    _seed(tmp_path, 7, "fix: same pr again")
+    assert _rollup(tmp_path, "1.0.1", "2026-02-01") == 2
+
+
+def test_rollup_finishes_an_interrupted_freeze(tmp_path):
+    # Crash after the archive is written but before its fragments are pruned.
+    # The archive is a pure function of those fragments, so the next rollup
+    # rewrites it and completes the prune rather than wedging.
+    _seed(tmp_path, 1, "feat: a")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
+    (tmp_path / ".changes" / "1.0.x.md").write_text("# Changelog — 1.0.x\n")
+    _seed(tmp_path, 2, "feat: b")
+    assert _rollup(tmp_path, "1.1.0", "2026-02-01") == 0
+    archive = (tmp_path / ".changes" / "1.0.x.md").read_text()
+    assert "## [1.0.0]" in archive
+    assert {p.name for p in (tmp_path / ".changes" / "released").glob("*.json")} \
+        == {"2.json"}
+
+
+def test_an_author_may_not_stamp_release_fields(tmp_path):
+    # impact decides the Possible Breaking Changes section; a pull request that
+    # could set it would classify itself.
+    for field, value in (("impact", "minor"), ("version", "1.0.0"),
+                         ("date", "2026-01-01")):
+        _write(tmp_path, 1, "feat", summary="s", **{field: value})
+        assert _check(tmp_path, 1, "feat: s") == 1
+
+
+def test_a_released_fragment_must_carry_its_version(tmp_path):
+    # Without the stamp the entry renders nowhere, so a caller that writes a
+    # changelog must stop instead of publishing a file that lost it.
+    _released(tmp_path, 1, "1.0.0")
+    p = tmp_path / ".changes" / "released" / "1.json"
+    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "A", "url": "u",
+                             "notes": "", "date": "2026-01-01"}))
+    assert cl.audit_released(tmp_path / ".changes")
+
+
+def test_an_archive_points_back_at_the_current_changelog(tmp_path):
+    # .changes/<line>.md is one level down, so `..` reaches the repo root.
+    _seed(tmp_path, 1, "feat: a")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
+    _seed(tmp_path, 2, "feat: b")
+    _rollup(tmp_path, "1.1.0", "2026-02-01")
+    assert "(../CHANGELOG.md)" in (tmp_path / ".changes" / "1.0.x.md").read_text()

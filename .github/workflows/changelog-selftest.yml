@@ -80,24 +80,27 @@ jobs:
           }
 
           mutate "a placeholder pr number is accepted" 'elif pr <= 0:' 'elif False:'
-          mutate "doc entries stop being rendered" \
+          mutate "a whole type section stops rendering" \
             'for typ, cat in CATEGORY.items():' 'for typ, cat in list(CATEGORY.items())[:2]:'
           mutate "seed accepts pr 0" 'if args.pr <= 0:' 'if False:'
           mutate "a stray fragment is tolerated" 'stray-fragment' 'ok'
           mutate "a modified fragment is tolerated" 'modified-fragment' 'ok'
-          mutate "a version may go backwards" \
-            'if highest is not None and new_tuple <= highest:' 'if False:'
-          mutate "a frozen line may be reopened" \
-            'if new_tuple[:2] == line:' 'if False:'
-          mutate "a version older than a frozen line is accepted" \
-            'if new_tuple[:2] < line:' 'if False:'
+          mutate "a version may go backwards" 'if new <= highest:' 'if False:'
+          mutate "an archived line may be reopened" 'if new[:2] == line:' 'if False:'
+          mutate "a version older than an archived line is accepted" \
+            'if new[:2] < line:' 'if False:'
+          mutate "a release before 1.0.0 is rolled up" \
+            'if new < FIRST_VERSION:' 'if False:'
+          mutate "a pull request may be released twice" 'if dupes:' 'if False:'
+          mutate "an author may stamp the release fields" 'if stamped:' 'if False:'
+          mutate "a released fragment may lose its version" 'if released:' 'if False:'
           mutate "a revert needs no notes" 'and not notes.strip():' 'and False:'
           mutate "the title convention is not enforced" 'bad-title' 'ok'
           mutate "an invalid released fragment is rendered anyway" \
             'if audit_released(args.changes_dir):' 'if False:'
           mutate "a type mismatch is tolerated" 'type-mismatch' 'ok'
-          mutate "a freeze keeps the fragments it should drop" \
-            'for release_dir in list_releases_in(frozen_dir):' 'for release_dir in []:'
+          mutate "an archived line keeps the fragments it should drop" \
+            'for frag in frags:' 'for frag in []:'
 
           cp /tmp/pristine.py "$CLP"
           echo
@@ -128,9 +131,8 @@ jobs:
           git init -q -b test-main .
           git config user.name t; git config user.email t@t
           mkdir -p .changes/preview
-          cp -r "${GITHUB_WORKSPACE}/.changes/latest" .changes/latest
-          cp -r "${GITHUB_WORKSPACE}/.changes/0.15.x" .changes/0.15.x
-          git add -A && git commit -q -m "seed released history"
+          cp "${GITHUB_WORKSPACE}/.changes/README.md" .changes/README.md
+          git add -A && git commit -q -m "seed a changes tree with no releases"
 
           export CHANGELOG_PY="${GITHUB_WORKSPACE}/.github/scripts/changelog.py"
           export DEFAULT_BRANCH=test-main DOCS_BRANCH=test-docs PUSH=false
@@ -153,16 +155,15 @@ jobs:
           echo "merge 1: release branch untouched"
 
           # --- merge 2: a release rolls the fragment up
-          python3 "$CHANGELOG_PY" rollup --version 0.17.0 --date 2026-11-01 \
+          python3 "$CHANGELOG_PY" rollup --version 1.1.0 --date 2026-11-01 \
             --changes-dir .changes --changelog CHANGELOG.md
-          git add -A && git commit -q -m "chore(release): 0.17.0"
+          git add -A && git commit -q -m "chore(release): 1.1.0"
           TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY"
 
           git checkout -q test-docs
-          grep -qF "## [0.17.0]" CHANGELOG.md
+          grep -qF "## [1.1.0]" CHANGELOG.md
           grep -qF "Add a widget" CHANGELOG.md
           grep -qF "## [Preview]" CHANGELOG.md
-          [[ -f .changes/0.16.x/CHANGELOG.md ]]
           echo "merge 2: docs shows the release and still has a Preview block"
 
           # --- idempotence: replaying the same sha again changes nothing
@@ -222,8 +223,8 @@ jobs:
           python3 "${CL}" render --changes-dir "${WORK}/.changes" \
                                  --changelog "${WORK}/CHANGELOG.md"
           diff -u "${WORK}/first.md" "${WORK}/CHANGELOG.md"
-          # Everything released so far must appear, and the preview fragment too.
-          for want in "## [Preview]" "([#24]" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
+          # Nothing is released yet, so every in-flight fragment must appear.
+          for want in "## [Preview]" "([#1283]" "([#1285]"; do
             grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
           done
           OUT="${RUNNER_TEMP:-/tmp}/rendered-CHANGELOG.md"
@@ -247,55 +248,62 @@ jobs:
           WORK="$(mktemp -d)"; cp -r .changes "${WORK}/.changes"
           cd "${WORK}"
           echo "=== starting point"
-          find .changes -maxdepth 2 -type d | sort
+          find .changes -type f | sort
 
-          # --- patch: 0.16.2 accretes beside 0.16.0 and 0.16.1 in latest/
-          echo "=== patch 0.16.2"
-          python3 "${CL}" rollup --version 0.16.2 --date 2026-09-01 \
-            --changes-dir .changes --changelog CHANGELOG.md
-          [[ -f .changes/latest/0.16.2/24.json ]] || { echo "fragment did not move" >&2; exit 1; }
-          [[ -d .changes/latest/0.16.0 && -d .changes/latest/0.16.1 ]]
+          # --- patch: 1.0.2 releases the in-flight fragments
+          echo "=== patch 1.0.2"
+          python3 "${CL}" rollup --version 1.0.2 --date 2026-09-01 \
+            --changes-dir .changes --changelog CHANGELOG.md --minor-prs 1283
+          [[ -f .changes/released/1283.json ]] || { echo "fragment did not move" >&2; exit 1; }
           [[ -z "$(ls -A .changes/preview)" ]] || { echo "preview not drained" >&2; exit 1; }
-          grep -qF "## [0.16.2]" CHANGELOG.md
+          grep -qF "## [1.0.2]" CHANGELOG.md
+          # The label the caller passed decides the section, and it is stamped in.
+          grep -qF '"impact": "minor"' .changes/released/1283.json
+          grep -qF "### Possible Breaking Changes" CHANGELOG.md
           cp CHANGELOG.md /tmp/after-patch.md
 
-          # --- minor: freezes 0.16.x and opens a fresh latest/
-          printf '{"pr":25,"type":"feat","summary":"New retry strategy","url":"u","notes":""}\n' \
-            > .changes/preview/25.json
-          echo "=== minor 0.17.0"
-          python3 "${CL}" rollup --version 0.17.0 --date 2026-10-01 \
+          # --- minor: archives 1.0.x to one file
+          printf '{"pr":1290,"type":"feat","summary":"New retry strategy","url":"u","notes":""}\n' \
+            > .changes/preview/1290.json
+          echo "=== minor 1.1.0"
+          python3 "${CL}" rollup --version 1.1.0 --date 2026-10-01 \
             --changes-dir .changes --changelog CHANGELOG.md
-          [[ -f .changes/0.16.x/CHANGELOG.md ]] || { echo "no frozen snapshot" >&2; exit 1; }
-          # The frozen line keeps only its snapshot; latest/ keeps fragments.
-          [[ "$(ls .changes/0.16.x)" == "CHANGELOG.md" && -d .changes/latest/0.17.0 ]]
-          [[ ! -d .changes/latest/0.16.2 ]]
-          # The frozen snapshot holds its own line and nothing newer.
-          grep -qF "## [0.16.2]" .changes/0.16.x/CHANGELOG.md
-          grep -qF "## [0.16.0]" .changes/0.16.x/CHANGELOG.md
-          ! grep -qF "0.17.0" .changes/0.16.x/CHANGELOG.md
-          # The root holds the new line and links the frozen ones.
-          grep -qF "## [0.17.0]" CHANGELOG.md
-          ! grep -qF "## [0.16.2]" CHANGELOG.md
-          grep -qF "0.16.x" CHANGELOG.md && grep -qF "0.15.x" CHANGELOG.md
+          [[ -f .changes/1.0.x.md ]] || { echo "no archive" >&2; exit 1; }
+          # The archive is the whole record of that line; its fragments are gone.
+          [[ "$(ls .changes/released)" == "1290.json" ]]
+          grep -qF "## [1.0.2]" .changes/1.0.x.md
+          ! grep -qF "1.1.0" .changes/1.0.x.md
+          # The root holds the new line and links the archive.
+          grep -qF "## [1.1.0]" CHANGELOG.md
+          ! grep -qF "## [1.0.2]" CHANGELOG.md
+          grep -qF "1.0.x.md" CHANGELOG.md
 
-          # --- guards: a release must never go backwards or reopen a frozen line
+          # --- guards: a release must not go backwards, reopen an archived line,
+          #     predate 1.0.0, or ship a second entry for a released pull request
           echo "=== guards"
-          ! python3 "${CL}" rollup --version 0.16.3 --date 2026-10-02 \
+          ! python3 "${CL}" rollup --version 1.0.3 --date 2026-10-02 \
               --changes-dir .changes --changelog CHANGELOG.md
-          ! python3 "${CL}" rollup --version 0.17.0 --date 2026-10-02 \
+          ! python3 "${CL}" rollup --version 1.1.0 --date 2026-10-02 \
               --changes-dir .changes --changelog CHANGELOG.md
-          echo "all three refused, as expected"
+          ! python3 "${CL}" rollup --version 0.9.9 --date 2026-10-02 \
+              --changes-dir .changes --changelog CHANGELOG.md
+          printf '{"pr":1290,"type":"fix","summary":"Again","url":"u","notes":""}\n' \
+            > .changes/preview/1290.json
+          ! python3 "${CL}" rollup --version 1.1.1 --date 2026-10-03 \
+              --changes-dir .changes --changelog CHANGELOG.md
+          rm .changes/preview/1290.json
+          echo "all four refused, as expected"
 
           SIM="${RUNNER_TEMP:-/tmp}/sim"
           mkdir -p "$SIM"
-          cp /tmp/after-patch.md "$SIM/after-patch-0.16.2.md"
-          cp CHANGELOG.md "$SIM/after-minor-0.17.0.md"
-          cp .changes/0.16.x/CHANGELOG.md "$SIM/frozen-0.16.x.md"
+          cp /tmp/after-patch.md "$SIM/after-patch-1.0.2.md"
+          cp CHANGELOG.md "$SIM/after-minor-1.1.0.md"
+          cp .changes/1.0.x.md "$SIM/archived-1.0.x.md"
           find .changes -type f | sort > "$SIM/final-tree.txt"
           { echo "### After the simulated minor (root)"; echo '```markdown';
             cat CHANGELOG.md; echo '```';
-            echo "### Frozen 0.16.x snapshot"; echo '```markdown';
-            cat .changes/0.16.x/CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo "### Archived 1.0.x"; echo '```markdown';
+            cat .changes/1.0.x.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
       - name: This repo must be untouched
         run: |
           set -euo pipefail
