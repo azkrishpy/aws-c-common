@@ -21,7 +21,7 @@ BASE="${3:?base ref}"
 TOOLING="${4:?ref holding .github/scripts}"
 
 BIN="$(mktemp -d)"
-for f in changelog.py docs-replay.sh; do
+for f in changelog.py fragments.py render.py release.py check.py docs-replay.sh; do
   git show "${TOOLING}:.github/scripts/${f}" > "${BIN}/${f}"
 done
 chmod +x "${BIN}"/*

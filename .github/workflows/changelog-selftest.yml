@@ -46,18 +46,31 @@ jobs:
         run: |
           set -uo pipefail +e
           # A green suite proves nothing unless removing a guard turns it red.
-          CLP=.github/scripts/changelog.py
-          cp "$CLP" /tmp/pristine.py
+          MODULES=(.github/scripts/fragments.py .github/scripts/render.py
+                   .github/scripts/release.py .github/scripts/check.py
+                   .github/scripts/changelog.py)
+          mkdir -p /tmp/pristine
+          cp "${MODULES[@]}" /tmp/pristine/
           survived=0; killed=0
+          restore() { for m in "${MODULES[@]}"; do cp "/tmp/pristine/$(basename "$m")" "$m"; done; }
 
           mutate() {
-            local label="$1" old="$2" new="$3"
-            cp /tmp/pristine.py "$CLP"
-            if ! python3 .github/scripts/mutate.py "$CLP" "$old" "$new"; then
+            local label="$1" old="$2" new="$3" target=""
+            restore
+            # Which module holds the guard is derived, so moving a function
+            # between modules cannot silently stop a mutation from applying.
+            for m in "${MODULES[@]}"; do
+              if grep -qF -- "$old" "$m"; then target="$m"; break; fi
+            done
+            if [[ -z "$target" ]]; then
+              echo "BROKEN    ${label}  <- target absent from every module"
+              survived=$((survived+1)); return
+            fi
+            if ! python3 .github/scripts/mutate.py "$target" "$old" "$new"; then
               echo "BROKEN    ${label}  <- target absent, fix the mutation"
               survived=$((survived+1)); return
             fi
-            if cmp -s /tmp/pristine.py "$CLP"; then
+            if cmp -s "/tmp/pristine/$(basename "$target")" "$target"; then
               echo "BROKEN    ${label}  <- mutation changed nothing"
               survived=$((survived+1)); return
             fi
@@ -102,7 +115,7 @@ jobs:
           mutate "an archived line keeps the fragments it should drop" \
             'for frag in frags:' 'for frag in []:'
 
-          cp /tmp/pristine.py "$CLP"
+          restore
           echo
           echo "mutation-check: ${killed} killed, ${survived} survived"
           echo "mutation-check: ${killed} killed, ${survived} survived" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
