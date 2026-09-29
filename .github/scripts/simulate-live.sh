@@ -58,7 +58,6 @@ replay() {   # mirror the merge onto the docs branch, exactly as CI does
 merge_pr() { # merge_pr <days-ago> <pr> <type> <summary> [notes]
   local ago="$1" pr="$2" typ="$3" summary="$4" notes="${5:-}"
   python3 "$CL" seed --pr "$pr" --title "${typ}: ${summary}" \
-    --url "https://github.com/azkrishpy/aws-c-common/pull/${pr}" \
     --changes-dir .changes >/dev/null
   if [[ -n "$notes" ]]; then
     python3 - "$pr" "$notes" <<'PY'

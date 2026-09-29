@@ -9,7 +9,7 @@ import changelog as cl  # noqa: E402
 
 def _seed(tmp_path, pr, title):
     return cl.main([
-        "seed", "--pr", str(pr), "--title", title, "--url", f"https://x/pr/{pr}",
+        "seed", "--pr", str(pr), "--title", title,
         "--changes-dir", str(tmp_path / ".changes"),
     ])
 
@@ -34,7 +34,7 @@ def _rollup(tmp_path, version, date, minor_prs=""):
 # ---------- seed ----------
 
 def test_seed_refuses_a_placeholder_pr(tmp_path):
-    assert cl.main(["seed", "--pr", "0", "--title", "feat: x", "--url", "u",
+    assert cl.main(["seed", "--pr", "0", "--title", "feat: x",
                     "--changes-dir", _changes(tmp_path)]) == 2
     assert not (tmp_path / ".changes" / "preview" / "0.json").exists()
 
@@ -47,7 +47,6 @@ def test_seed_writes_fragment(tmp_path):
         "pr": 843,
         "type": "feat",
         "summary": "Add SSO sign-in for enterprise accounts.",
-        "url": "https://x/pr/843",
         "notes": "",
     }
 
@@ -75,7 +74,7 @@ def test_validate_rejects_missing_fields(tmp_path):
 
 def test_validate_rejects_bad_type(tmp_path):
     p = tmp_path / "x.json"
-    p.write_text(json.dumps({"pr": 1, "type": "bogus", "summary": "x", "url": "u"}))
+    p.write_text(json.dumps({"pr": 1, "type": "bogus", "summary": "x"}))
     assert cl.validate_fragment(p)
 
 
@@ -93,7 +92,7 @@ def test_check_rejects_an_invalid_fragment(tmp_path, capsys):
     _changes(tmp_path)
     p = tmp_path / ".changes" / "preview" / "5.json"
     p.write_text(json.dumps(
-        {"pr": 5, "type": "feat", "summary": "s", "url": "u", "notes": 7}))
+        {"pr": 5, "type": "feat", "summary": "s", "notes": 7}))
     assert cl.main(["check", "--pr", "5", "--title", "feat: x",
                     "--changes-dir", _changes(tmp_path)]) == 1
     assert "CHANGELOG_CHECK_REASON::invalid-fragment" in capsys.readouterr().out
@@ -149,7 +148,7 @@ def test_render_preserves_summary_punctuation(tmp_path):
     _seed(tmp_path, 2, "fix: Handle overflow!")
     _seed(tmp_path, 3, "feat: Add SSO")
     text = _render(tmp_path)
-    assert "429? ([#1]" in text
+    assert "429? ([#1](../../pull/1)" in text
     assert "overflow! ([#2]" in text
     assert "SSO. ([#3]" in text
     assert "429?." not in text and "overflow!." not in text
@@ -322,7 +321,7 @@ def _changes(tmp_path):
 def _write(tmp_path, pr, typ, summary="s", notes="", **over):
     _changes(tmp_path)
     frag = {"pr": pr, "type": typ, "summary": summary,
-            "url": f"https://x/pull/{pr}", "notes": notes}
+            "notes": notes}
     frag.update(over)
     (tmp_path / ".changes" / "preview" / f"{pr}.json").write_text(
         json.dumps(frag) + "\n")
@@ -495,14 +494,14 @@ def test_rollup_refuses_a_malformed_fragment(tmp_path):
 def test_rollup_refuses_a_schema_invalid_fragment(tmp_path):
     _seed(tmp_path, 1, "feat: a")
     _preview(tmp_path, "2.json", json.dumps(
-        {"pr": "two", "type": "feat", "summary": "", "url": "u"}))
+        {"pr": "two", "type": "feat", "summary": ""}))
     assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
 
 
 def test_rollup_refuses_a_fragment_whose_name_and_pr_disagree(tmp_path):
     # Would render the entry under someone else's number.
     _preview(tmp_path, "1.json", json.dumps(
-        {"pr": 999, "type": "feat", "summary": "Mislabelled", "url": "u", "notes": ""}))
+        {"pr": 999, "type": "feat", "summary": "Mislabelled", "notes": ""}))
     assert _rollup(tmp_path, "1.0.0", "2026-01-01") == 2
 
 
@@ -658,7 +657,7 @@ def _released(tmp_path, pr, version, date="2026-01-01", **over):
     """Write one already-released fragment, as a rollup would have stamped it."""
     d = tmp_path / ".changes" / "released"
     d.mkdir(parents=True, exist_ok=True)
-    frag = {"pr": pr, "type": "feat", "summary": "A", "url": "u", "notes": "",
+    frag = {"pr": pr, "type": "feat", "summary": "A", "notes": "",
             "version": version, "date": date}
     frag.update(over)
     p = d / f"{pr}.json"
@@ -696,7 +695,7 @@ def test_validate_rejects_malformed_json(tmp_path):
 
 def test_validate_rejects_non_string_notes(tmp_path):
     p = tmp_path / "x.json"
-    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "s", "url": "u", "notes": 7}))
+    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "s", "notes": 7}))
     assert cl.validate_fragment(p)
 
 
@@ -714,13 +713,7 @@ def test_a_revert_with_notes_is_valid(tmp_path):
 
 def test_a_placeholder_pr_number_is_invalid(tmp_path):
     p = tmp_path / "x.json"
-    p.write_text(json.dumps({"pr": 0, "type": "feat", "summary": "s", "url": "u", "notes": ""}))
-    assert cl.validate_fragment(p)
-
-
-def test_an_empty_url_is_invalid(tmp_path):
-    p = tmp_path / "x.json"
-    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "s", "url": "", "notes": ""}))
+    p.write_text(json.dumps({"pr": 0, "type": "feat", "summary": "s", "notes": ""}))
     assert cl.validate_fragment(p)
 
 
@@ -798,9 +791,20 @@ def test_a_released_fragment_must_carry_its_version(tmp_path):
     # changelog must stop instead of publishing a file that lost it.
     _released(tmp_path, 1, "1.0.0")
     p = tmp_path / ".changes" / "released" / "1.json"
-    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "A", "url": "u",
+    p.write_text(json.dumps({"pr": 1, "type": "feat", "summary": "A",
                              "notes": "", "date": "2026-01-01"}))
     assert cl.audit_released(tmp_path / ".changes")
+
+
+def test_a_pull_request_link_resolves_from_both_depths(tmp_path):
+    # /owner/repo/blob/<branch>/CHANGELOG.md needs ../../ to reach the repo root;
+    # an archive one directory deeper needs ../../../. Verified against urljoin.
+    _seed(tmp_path, 1, "feat: a")
+    _rollup(tmp_path, "1.0.0", "2026-01-01")
+    _seed(tmp_path, 2, "feat: b")
+    _rollup(tmp_path, "1.1.0", "2026-02-01")
+    assert "(../../pull/2)" in (tmp_path / "CHANGELOG.md").read_text()
+    assert "(../../../pull/1)" in (tmp_path / ".changes" / "1.0.x.md").read_text()
 
 
 def test_an_archive_points_back_at_the_current_changelog(tmp_path):

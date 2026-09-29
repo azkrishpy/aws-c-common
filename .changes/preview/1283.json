@@ -2,6 +2,5 @@
   "pr": 1283,
   "type": "feat",
   "summary": "Add aws_byte_cursor_split for zero-copy tokenising.",
-  "url": "https://github.com/awslabs/aws-c-common/pull/1283",
   "notes": ""
 }

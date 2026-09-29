@@ -32,17 +32,15 @@ still has every one.
   "pr": 1212,
   "type": "feat",
   "summary": "Add an API for compact (dash-free) UUID-to-string conversion.",
-  "url": "https://github.com/awslabs/aws-c-common/pull/1212",
   "notes": ""
 }
 ```
 
 | Field | Values |
 |---|---|
-| `pr` | PR number; also the filename |
+| `pr` | PR number; also the filename, and what the entry's link is built from |
 | `type` | `feat` \| `fix` \| `chore` \| `revert` |
 | `summary` | customer-facing one sentence |
-| `url` | link to the PR |
 | `notes` | optional extended notes; rendered as their own entry |
 
 `version`, `date` and `impact` are added at release time and rejected from a

@@ -16,7 +16,6 @@ By submitting this pull request, I confirm that my contribution is made under th
   "pr": <PR>,
   "type": "feat",
   "summary": "<customer-facing sentence>",
-  "url": "<PR URL>",
   "notes": ""
 }
 ```

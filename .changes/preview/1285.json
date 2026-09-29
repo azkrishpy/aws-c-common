@@ -2,6 +2,5 @@
   "pr": 1285,
   "type": "fix",
   "summary": "Guard aws_hash_table against a zero-length key.",
-  "url": "https://github.com/awslabs/aws-c-common/pull/1285",
   "notes": ""
 }

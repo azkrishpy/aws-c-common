@@ -15,11 +15,14 @@ import re
 import sys
 from pathlib import Path
 
+
 VALID_TYPES = {"feat", "fix", "chore", "revert"}
+
 
 # Section order. chore has no row: documentation and maintenance are internal,
 # so requiring a fragment would force authors to write text no customer reads.
 CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
+
 
 # A fragment the ABI check called `minor` renders here instead of its own type
 # section: a consumer may have to change something to take the release.
@@ -29,25 +32,36 @@ BREAKING_SECTION = "Possible Breaking Changes"
 # type set would silently drop released entries from a regenerated file.
 assert set(CATEGORY) | {"chore"} == VALID_TYPES
 
+
 # Release-time fields. The author writes none of them: `impact` decides whether
 # an entry lands under Possible Breaking Changes, so accepting it from a pull
 # request would let that pull request classify itself.
 STAMPED = ("version", "date", "impact")
 
+
 # No changelog before this. Everything earlier shipped without fragments, so a
 # rollup of it would render a release whose entries do not exist.
 FIRST_VERSION = (1, 0, 0)
 
+
 TITLE_RE = re.compile(
     r"^(feat|fix|chore|revert)(?:\([^)]+\))?:\s*(.+)$", re.IGNORECASE
 )
+
+
 # GitHub's Revert button generates `Revert "<original title> (#<n>)"`, which
 # carries no `<type>:` prefix. Accepting it verbatim means a maintainer using
 # the button never has to retitle; the author still writes the fragment, since
 # only they can say WHY it was reverted.
 REVERT_TITLE_RE = re.compile(r'^revert\s+"(.+)"\s*$', re.IGNORECASE)
+
+
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
 LINE_FILE_RE = re.compile(r"^(\d+)\.(\d+)\.x\.md$")
+
+
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -62,9 +76,7 @@ def parse_title(title):
     if m:
         return "revert", m.group(1).strip()
     return None, title
-
-
-REQUIRED_FRAGMENT = {"pr", "type", "summary", "url"}
+REQUIRED_FRAGMENT = {"pr", "type", "summary"}
 
 
 def validate_fragment(path, released=False):
@@ -84,11 +96,11 @@ def validate_fragment(path, released=False):
     if not isinstance(pr, int) or isinstance(pr, bool):
         errs.append(f"{path}: pr must be int")
     elif pr <= 0:
-        # A placeholder renders as a dead `(#0)` reference.
+        # Whether the number is a real pull request cannot be settled here: this
+        # runs with no token and no network. `check` does settle it, by asserting
+        # the fragment agrees with the --pr the caller was triggered for. What is
+        # left is the placeholder, which renders as a dead `(#0)` reference.
         errs.append(f"{path}: pr must be the real pull request number, not {pr}")
-    u = data.get("url")
-    if not isinstance(u, str) or not u.strip():
-        errs.append(f"{path}: url must be non-empty string")
     if "impact" in data and data["impact"] != "minor":
         errs.append(f'{path}: impact, when present, must be "minor"')
     if "version" in data and not SEMVER_RE.match(str(data["version"])):
@@ -125,41 +137,47 @@ def fmt_semver(t):
 SENTENCE_END = (".", "!", "?")
 
 
-def pr_link(frag):
+# A pull request link is derived from the number, not stored beside it: the two
+# could disagree, and only one of them is the fragment's identity. `up` is how
+# many segments the rendered file sits below the repo root, because
+# /<owner>/<repo>/blob/<branch>/<file> reaches /<owner>/<repo>/pull/<n> only from
+# the right depth. The root file is two down; an archive under .changes/ is three.
+ROOT_UP, ARCHIVE_UP = "../../", "../../../"
+def pr_link(frag, up):
     """`#843` linked to the pull request, so an archived file still resolves."""
-    return f"[#{frag['pr']}]({frag['url']})"
+    return f"[#{frag['pr']}]({up}pull/{frag['pr']})"
 
 
-def render_entry(frag):
+def render_entry(frag, up):
     summary = frag["summary"].strip()
     if not summary.endswith(SENTENCE_END):
         summary += "."
-    return f"- {summary} ({pr_link(frag)})"
+    return f"- {summary} ({pr_link(frag, up)})"
 
 
-def render_note(frag):
+def render_note(frag, up):
     """A note is its own entry, led by the pull request it explains."""
     body = frag["notes"].strip().splitlines()
-    return "\n  ".join([f"- {pr_link(frag)} — {body[0]}", *body[1:]])
+    return "\n  ".join([f"- {pr_link(frag, up)} — {body[0]}", *body[1:]])
 
 
-def _section(heading, entries, render):
+def _section(heading, entries, render, up):
     if not entries:
         return []
     return [f"### {heading}",
-            *(render(e) for e in sorted(entries, key=lambda f: f["pr"])), ""]
+            *(render(e, up) for e in sorted(entries, key=lambda f: f["pr"])), ""]
 
 
-def render_grouped(fragments):
+def render_grouped(fragments, up=ROOT_UP):
     """Sections in a fixed order, each omitted when it would be empty."""
     breaking = [f for f in fragments if f.get("impact") == "minor"]
-    lines = _section(BREAKING_SECTION, breaking, render_entry)
-    for typ, cat in CATEGORY.items():
+    lines = _section(BREAKING_SECTION, breaking, render_entry, up)
+    for pr_type, cat in CATEGORY.items():
         rest = [f for f in fragments
-                if f["type"] == typ and f.get("impact") != "minor"]
-        lines += _section(cat, rest, render_entry)
+                if f["type"] == pr_type and f.get("impact") != "minor"]
+        lines += _section(cat, rest, render_entry, up)
     lines += _section("Notes", [f for f in fragments if f.get("notes", "").strip()],
-                      render_note)
+                      render_note, up)
     return "\n".join(lines).rstrip() + "\n" if lines else ""
 
 
@@ -178,8 +196,6 @@ def _load_valid_fragment(path):
             print(f"WARN: skipping {e}", file=sys.stderr)
         return None
     return data
-
-
 def load_dir(d):
     """Every valid fragment in one directory; invalid ones warn and drop out."""
     d = Path(d)
@@ -225,10 +241,10 @@ def audit_released(changes_dir):
     return bool(errs)
 
 
-def _release_sections(groups):
+def _release_sections(groups, up=ROOT_UP):
     out = []
     for version, frags in groups:
-        body = render_grouped(frags)
+        body = render_grouped(frags, up)
         # A release whose every fragment was a chore renders nothing, and a bare
         # header reads as a broken file.
         if body:
@@ -274,19 +290,33 @@ def render_line_archive(line, groups):
     """A self-contained file for a minor line that will take no more releases."""
     body = [f"# Changelog — {line}", "",
             "Current releases are in the [top-level changelog](../CHANGELOG.md).", ""]
-    return "\n".join(body + _release_sections(groups)).rstrip() + "\n"
+    return "\n".join(body + _release_sections(groups, ARCHIVE_UP)).rstrip() + "\n"
 
 
 # ---------- commands ----------
+#
+# One `cmd_<verb>` per CLI subcommand, wired to its subparser in main(). Each
+# returns the process exit code rather than raising, so a caller in a shell step
+# can branch on it. Everything above this line is a pure function of its inputs;
+# these are the only entry points that read argv or write files.
 
 def cmd_seed(args):
+    """Write the fragment a pull request is missing, derived from its title.
+
+    The counterpart to validate_fragment, not a duplicate of it: this produces a
+    fragment and validation consumes one. It exists so nobody has to hand-write
+    JSON -- the bot posts the output of this as a ready-to-paste comment, and
+    `new-change` runs it in a local clone. It deliberately writes without
+    validating: the summary it derives from a title is a starting point the author
+    is expected to rewrite, and `check` is what refuses a bad one at the gate.
+    """
     if args.pr <= 0:
         _err(f"--pr must be the real pull request number, not {args.pr}")
         return 2
-    typ, summary = parse_title(args.title)
-    if typ is None:
-        typ = "chore"
-    if typ == "revert":
+    pr_type, summary = parse_title(args.title)
+    if pr_type is None:
+        pr_type = "chore"
+    if pr_type == "revert":
         # The button's title is `Revert "<original title> (#N)"`; neither the
         # original type prefix nor its number belongs in this entry.
         summary = re.sub(r"^(feat|fix|chore|revert)(\([^)]+\))?:\s*", "", summary,
@@ -294,9 +324,12 @@ def cmd_seed(args):
         summary = re.sub(r"\s*\(#\d+\)\s*$", "", summary)
         if not summary.lower().startswith("revert"):
             summary = f"Reverted {summary}"
-    frag = {"pr": args.pr, "type": typ, "summary": summary, "url": args.url,
-            "notes": ""}
-    out = Path(args.changes_dir) / "preview" / f"{args.pr}.json"
+    frag = {"pr": args.pr, "type": pr_type, "summary": summary, "notes": ""}
+    # The caller that seeds a template writes it outside the directory `check`
+    # reads, so a generated starting point is never mistaken for a fragment the
+    # author committed.
+    out = (Path(args.out) if args.out
+           else Path(args.changes_dir) / "preview" / f"{args.pr}.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists() and not args.force:
         # Non-zero, so a caller cannot mistake "declined" for "wrote it".
@@ -305,8 +338,6 @@ def cmd_seed(args):
     out.write_text(json.dumps(frag, indent=2) + "\n")
     print(str(out))
     return 0
-
-
 def parse_changed_paths(path, prefix):
     """Read `status<TAB>path` lines, keeping only entries under `prefix`."""
     out = []
@@ -317,7 +348,7 @@ def parse_changed_paths(path, prefix):
     return out
 
 
-def check_fragment_changes(args, typ, reason):
+def check_fragment_changes(args, pr_type, reason):
     """Assert the PR's changes under `prefix` are exactly one new fragment.
 
     Returns an exit code to stop on, or None to carry on with the usual checks.
@@ -335,7 +366,7 @@ def check_fragment_changes(args, typ, reason):
     if wrong:
         listed = "\n".join(f"         {st:<10} {p}" for st, p in wrong)
         print(
-            f"ERROR: a `{typ}` change may only add its own changelog fragment.\n"
+            f"ERROR: a `{pr_type}` change may only add its own changelog fragment.\n"
             f"       expected exactly one new file:\n"
             f"         added      {expected}\n"
             f"       but this pull request also changes:\n{listed}\n"
@@ -389,8 +420,8 @@ def cmd_check(args):
         print("ERROR: --title is required to derive the change type", file=sys.stderr)
         return 2
 
-    typ, _summary = parse_title(title)
-    if typ is None:
+    pr_type, _summary = parse_title(title)
+    if pr_type is None:
         print(
             f'ERROR: PR title does not follow the convention: "{title}"\n'
             f"       expected `<type>: <summary>` with type one of "
@@ -401,13 +432,13 @@ def cmd_check(args):
         reason("bad-title")
         return 1
 
-    if typ not in CATEGORY:
-        print(f"OK: #{args.pr} is a `{typ}` change; no changelog fragment required")
+    if pr_type not in CATEGORY:
+        print(f"OK: #{args.pr} is a `{pr_type}` change; no changelog fragment required")
         reason("exempt-type")
         return 0
 
     if args.changed_paths_file:
-        rc = check_fragment_changes(args, typ, reason)
+        rc = check_fragment_changes(args, pr_type, reason)
         if rc is not None:
             return rc
 
@@ -415,7 +446,7 @@ def cmd_check(args):
         print(
             f"ERROR: no changelog fragment for PR #{args.pr}.\n"
             f"       expected: {frag}\n"
-            f"       a `{typ}` change is customer-visible, so it needs an entry.\n"
+            f"       a `{pr_type}` change is customer-visible, so it needs an entry.\n"
             f"       commit that file with this pull request -- the bot comments a\n"
             f"       ready-to-paste template.",
             file=sys.stderr,
@@ -452,9 +483,9 @@ def cmd_check(args):
         reason("pr-mismatch")
         return 1
 
-    if data.get("type") != typ:
+    if data.get("type") != pr_type:
         print(
-            f'ERROR: type mismatch. The PR title says `{typ}` but {frag} says '
+            f'ERROR: type mismatch. The PR title says `{pr_type}` but {frag} says '
             f'`{data.get("type")}`.\n'
             f"       Fix whichever is wrong -- they must agree.",
             file=sys.stderr,
@@ -462,7 +493,7 @@ def cmd_check(args):
         reason("type-mismatch")
         return 1
 
-    print(f"OK: #{args.pr} title is `{typ}` and its fragment is present and valid")
+    print(f"OK: #{args.pr} title is `{pr_type}` and its fragment is present and valid")
     reason("ok")
     return 0
 
@@ -598,8 +629,9 @@ def main(argv=None):
                        help="create a fragment for a PR (usually via new-change helper)")
     s.add_argument("--pr", type=int, required=True)
     s.add_argument("--title", required=True)
-    s.add_argument("--url", required=True)
     s.add_argument("--changes-dir", default=".changes")
+    s.add_argument("--out", default="",
+                   help="Write here instead of <changes-dir>/preview/<pr>.json.")
     s.add_argument("--force", action="store_true")
     s.set_defaults(func=cmd_seed)
 
