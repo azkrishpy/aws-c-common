@@ -5,6 +5,9 @@
 
 ### Features
 - Add aws_uuid_v7 for time-ordered identifiers. ([#1294](../../pull/1294))
+
+### Fixes
+- Guard aws_hash_table against a zero-length key. ([#1295](../../pull/1295))
 <!-- /changelog:unreleased -->
 
 ## [1.2.1] — 2026-09-26

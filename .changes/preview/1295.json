@@ -1,0 +1,6 @@
+{
+  "pr": 1295,
+  "type": "fix",
+  "summary": "Guard aws_hash_table against a zero-length key",
+  "notes": ""
+}
