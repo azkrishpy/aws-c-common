@@ -73,11 +73,10 @@ PY
   replay
 }
 
-release() {  # release <days-ago> <version> <highlights> <minor-prs>
-  local ago="$1" version="$2" highlights="$3" minor="$4"
+release() {  # release <days-ago> <version> <minor-prs>
+  local ago="$1" version="$2" minor="$3"
   local argv=(rollup --version "$version" --date "$(date -u -d "-${ago} days" +%Y-%m-%d)"
               --changes-dir .changes --changelog CHANGELOG.md --docs-branch "$DOCS")
-  [[ -n "$highlights" ]] && argv+=(--highlights "$highlights")
   [[ -n "$minor" ]] && argv+=(--minor-prs "$minor")
   python3 "$CL" "${argv[@]}"
   git add -A .changes CHANGELOG.md
@@ -85,62 +84,35 @@ release() {  # release <days-ago> <version> <highlights> <minor-prs>
   replay
 }
 
-# ---- adoption: bring the pre-existing tree up to the current rules ----------
-python3 - <<'PY'
-import json, pathlib
-p = pathlib.Path(".changes/latest/0.16.1/22.json")
-if p.exists():
-    d = json.loads(p.read_text())
-    if d.get("type") not in ("feat", "fix", "chore", "revert"):
-        d["type"] = "chore"
-        p.write_text(json.dumps(d, indent=2) + "\n")
-PY
-git rm -r -q --cached .changes/0.15.x/0.15.0 .changes/0.15.x/0.15.1 .changes/0.15.x/0.15.2 2>/dev/null || true
-rm -rf .changes/0.15.x/0.15.0 .changes/0.15.x/0.15.1 .changes/0.15.x/0.15.2
-git add -A .changes
-commit 56 "chore: adopt the changelog fragment rules
-
-Documentation is a chore now, so #22 is retyped. A frozen line keeps only its
-rendered snapshot; git history still has the fragments."
-replay
-
 # ---- the history -----------------------------------------------------------
-merge_pr 54 25 feat "Add aws_ring_buffer for zero-copy IO"
-merge_pr 52 26 fix  "Correct the byte-buf append bounds check"
-merge_pr 50 27 chore "Bump the CI container image"
-release  49 0.16.2 "Ring buffer and a bounds fix" ""
+merge_pr 27 1283 feat "Add aws_byte_cursor_split for zero-copy tokenising"
+merge_pr 25 1284 fix  "Correct the byte-buf append bounds check"
+merge_pr 24 1285 chore "Bump the CI container image"
+release  23 1.0.2 ""
 
-merge_pr 46 28 fix  "Handle EINTR in the pipe read loop"
-release  45 0.16.3 "" ""
-
-merge_pr 42 29 feat "Add tcp_nodelay to aws_socket_options" \
+merge_pr 21 1286 feat "Add tcp_nodelay to aws_socket_options" \
   "aws_socket_options grew from 40 to 44 bytes. Source-compatible, but a native
 consumer that embeds the struct must be rebuilt."
-merge_pr 40 30 fix  "Retry backoff off-by-one"
-merge_pr 38 31 chore "Document the thread-safety of aws_mutex"
-release  37 0.17.0 "Socket options grew a field" "29"
+merge_pr 20 1287 fix  "Retry backoff off-by-one"
+release  19 1.1.0 "1286"
 
-merge_pr 34 32 revert "Reverted the retry-default change" \
-  "It changed behaviour customers relied on. A replacement lands in 0.18."
-release  33 0.17.1 "" ""
+merge_pr 16 1288 fix  "Handle EINTR in the pipe read loop"
+release  15 1.1.1 ""
 
-merge_pr 30 33 chore "Update the copyright headers"
-release  29 0.17.2 "" ""
-
-merge_pr 26 34 feat "Replace the event-loop dispatch queue" \
+merge_pr 12 1289 feat "Replace the event-loop dispatch queue" \
   "The old aws_event_loop_vtable layout is gone. Implementers of a custom event
 loop must adopt the new vtable."
-merge_pr 24 35 feat "Add aws_uuid_to_compact_str"
-merge_pr 22 36 fix  "Null-deref in the event loop on shutdown"
-release  21 0.18.0 "Event loop rewrite" "34"
+merge_pr 11 1290 feat "Add aws_uuid_to_compact_str"
+merge_pr 10 1291 revert "Reverted the retry-default change" \
+  "It changed behaviour customers relied on. A replacement lands in 1.3."
+release   9 1.2.0 "1289"
 
-merge_pr 18 37 fix  "Leaking fd on socket teardown"
-merge_pr 16 38 chore "Bump aws-lc to 1.34"
-release  15 0.18.1 "" ""
+merge_pr  6 1292 fix  "Leaking fd on socket teardown"
+merge_pr  5 1293 chore "Bump aws-lc to 1.34"
+release   4 1.2.1 ""
 
-merge_pr  8 39 feat "Add aws_byte_cursor_split"
-merge_pr  5 40 fix  "Guard against a zero-length hash"
-merge_pr  2 41 chore "Tidy the CMake feature checks"
+merge_pr  2 1294 feat "Add aws_uuid_v7 for time-ordered identifiers"
+merge_pr  1 1295 fix  "Guard aws_hash_table against a zero-length key"
 
 echo
 echo "sim branch  ${SIM}:  $(git rev-list --count "${BASE}..${SIM}") commits on ${BASE}"
