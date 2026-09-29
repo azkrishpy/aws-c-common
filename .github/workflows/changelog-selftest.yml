@@ -226,15 +226,16 @@ jobs:
           for want in "## [Preview]" "([#24]" "## [0.16.1]" "## [0.16.0]" "0.15.x"; do
             grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
           done
-          cp "${WORK}/CHANGELOG.md" rendered-CHANGELOG.md
+          OUT="${RUNNER_TEMP:-/tmp}/rendered-CHANGELOG.md"
+          cp "${WORK}/CHANGELOG.md" "$OUT"
           { echo "### Rendered from the real tree"; echo '```markdown';
-            cat rendered-CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            cat "$OUT"; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
           echo "--- repo is unchanged:"; git status --porcelain -- .changes CHANGELOG.md
           [[ -z "$(git status --porcelain -- .changes CHANGELOG.md)" ]]
       - uses: actions/upload-artifact@v4
         with:
           name: rendered-changelog
-          path: rendered-CHANGELOG.md
+          path: ${{ runner.temp }}/rendered-CHANGELOG.md
 
   simulate-release:
     runs-on: ubuntu-24.04
@@ -285,11 +286,12 @@ jobs:
               --changes-dir .changes --changelog CHANGELOG.md
           echo "all three refused, as expected"
 
-          mkdir -p "${GITHUB_WORKSPACE}/sim"
-          cp /tmp/after-patch.md "${GITHUB_WORKSPACE}/sim/after-patch-0.16.2.md"
-          cp CHANGELOG.md "${GITHUB_WORKSPACE}/sim/after-minor-0.17.0.md"
-          cp .changes/0.16.x/CHANGELOG.md "${GITHUB_WORKSPACE}/sim/frozen-0.16.x.md"
-          find .changes -type f | sort > "${GITHUB_WORKSPACE}/sim/final-tree.txt"
+          SIM="${RUNNER_TEMP:-/tmp}/sim"
+          mkdir -p "$SIM"
+          cp /tmp/after-patch.md "$SIM/after-patch-0.16.2.md"
+          cp CHANGELOG.md "$SIM/after-minor-0.17.0.md"
+          cp .changes/0.16.x/CHANGELOG.md "$SIM/frozen-0.16.x.md"
+          find .changes -type f | sort > "$SIM/final-tree.txt"
           { echo "### After the simulated minor (root)"; echo '```markdown';
             cat CHANGELOG.md; echo '```';
             echo "### Frozen 0.16.x snapshot"; echo '```markdown';
@@ -303,4 +305,4 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-simulation
-          path: sim/
+          path: ${{ runner.temp }}/sim/
