@@ -266,8 +266,12 @@ def render_root_changelog(changes_dir, preview=True, docs_branch="docs"):
             "",
         ]
     else:
-        body += [f"Unreleased changes are rendered on the "
-                 f"[`{docs_branch}`](../../tree/{docs_branch}/CHANGELOG.md) branch.", ""]
+        # The relative link resolves from /owner/repo/blob/<branch>/CHANGELOG.md,
+        # so it only reaches the repo root when the branch name is a single path
+        # segment. A branch with a slash in it gets the name without a link.
+        pointer = (f"[`{docs_branch}`](../../tree/{docs_branch}/CHANGELOG.md)"
+                   if "/" not in docs_branch else f"`{docs_branch}`")
+        body += [f"Unreleased changes are rendered on the {pointer} branch.", ""]
     body += _release_sections(list_releases_in(Path(changes_dir) / "latest"))
     frozen = _frozen_lines(changes_dir)
     if frozen:
@@ -524,19 +528,6 @@ def _check_version_is_next(changes, new_tuple, new_version):
     return None
 
 
-def _infer_bump(current_minor, new_tuple):
-    """The bump the version itself implies. minor and major both freeze the
-    current line and differ only in the message."""
-    M_new, N_new, _ = new_tuple
-    if current_minor is None:
-        return "minor"
-    if (M_new, N_new) == current_minor:
-        return "patch"
-    if M_new != current_minor[0]:
-        return "major"
-    return "minor"
-
-
 def _freeze_current_line(changes, latest, current_minor):
     """Rename latest/ → M.N.x/, snapshot its CHANGELOG.md, reopen an empty
     latest/. Not atomic; a crash between the two is backfilled next run."""
@@ -624,8 +615,8 @@ def cmd_rollup(args):
         return 2
 
     current = v[:2] if (v := _latest_version_in_line(latest)) else None
-    bump = _infer_bump(current, new_tuple)
-    if bump in ("minor", "major") and current is not None:
+    bump = "patch" if current == new_tuple[:2] else "minor"
+    if bump == "minor" and current is not None:
         err = _freeze_current_line(changes, latest, current)
         if err:
             _err(err)

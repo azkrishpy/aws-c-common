@@ -697,6 +697,24 @@ def test_a_revert_title_is_not_double_prefixed(tmp_path):
     assert data["summary"] == "Reverted the retry default"
 
 
+def test_the_docs_pointer_is_only_linked_when_it_resolves(tmp_path):
+    # ../../tree/<branch>/ reaches the repo root only for a one-segment branch.
+    _seed(tmp_path, 1, "feat: a")
+    assert cl.main(["rollup", "--version", "0.1.0", "--date", "2026-01-01",
+                    "--changes-dir", _changes(tmp_path),
+                    "--changelog", str(tmp_path / "a.md"),
+                    "--docs-branch", "docs"]) == 0
+    assert "(../../tree/docs/CHANGELOG.md)" in (tmp_path / "a.md").read_text()
+
+    _seed(tmp_path, 2, "feat: b")
+    assert cl.main(["rollup", "--version", "0.2.0", "--date", "2026-02-01",
+                    "--changes-dir", _changes(tmp_path),
+                    "--changelog", str(tmp_path / "b.md"),
+                    "--docs-branch", "team/docs"]) == 0
+    text = (tmp_path / "b.md").read_text()
+    assert "`team/docs` branch" in text and "../../tree/team/docs" not in text
+
+
 def _release(tmp_path, line, version, meta=True, frag=True):
     d = tmp_path / ".changes" / line / version
     d.mkdir(parents=True, exist_ok=True)
