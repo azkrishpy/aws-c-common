@@ -173,6 +173,22 @@ jobs:
           echo "docs before=${BEFORE} after=$(git rev-parse test-docs)"
           [[ "$(git rev-parse test-docs)" == "$BEFORE" ]]
 
+          # --- merge 3: a real merge commit, as a non-squash branch produces
+          git checkout -q test-main
+          git checkout -q -b side
+          # The rollup emptied preview/, and git does not track an empty dir.
+          mkdir -p .changes/preview
+          printf '{"pr":42,"type":"fix","summary":"Fix a leak","url":"u","notes":""}\n' \
+            > .changes/preview/42.json
+          git add -A && git commit -q -m "fix: fix a leak (#42)"
+          git checkout -q test-main
+          git merge -q --no-ff side -m "Merge a pull request"
+          TRIGGER_SHA="$(git rev-parse HEAD)" bash "$REPLAY"
+
+          git checkout -q test-docs
+          grep -qF "Fix a leak" CHANGELOG.md
+          echo "merge 3: a merge commit replays against its first parent"
+
           { echo "### docs branch CHANGELOG.md after the replay"; echo '```markdown';
             cat CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 

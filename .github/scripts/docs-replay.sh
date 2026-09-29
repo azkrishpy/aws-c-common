@@ -35,10 +35,17 @@ else
   git checkout -B "${DOCS_BRANCH}" "$(git rev-parse "${TRIGGER_SHA}^")"
 fi
 
+# A merge commit has no single diff, so git needs the mainline named; branches
+# that take pull requests as merges rather than squashes produce them.
+MAINLINE=()
+if git rev-parse --verify --quiet "${TRIGGER_SHA}^2" >/dev/null; then
+  MAINLINE=(-m 1)
+fi
+
 # -x records the origin sha; --allow-empty tolerates an identical tree;
 # -Xno-renames avoids false renames once a rollup has moved fragments out of
 # preview/ into a released <version>/ directory on docs.
-if ! git cherry-pick -x --allow-empty \
+if ! git cherry-pick -x --allow-empty ${MAINLINE[@]+"${MAINLINE[@]}"} \
        --strategy=recursive -Xno-renames "${TRIGGER_SHA}"; then
   UNMERGED="$(git diff --name-only --diff-filter=U | sort -u)"
   if [[ -z "$UNMERGED" ]] && git diff --cached --quiet; then
