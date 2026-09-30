@@ -4,9 +4,9 @@
 Shaped on aws-c-common's actual history (213 releases across 14 minor lines,
 median 10 patches per line, busiest 69) so the numbers mean something.
 
-There is nothing to measure under .changes/ any more: a fragment is deleted once
-rendered, so the directory holds only what has not shipped. What grows is
-CHANGELOG.md, exactly as a hand-written changelog would.
+A fragment is deleted once rendered, so .changes/ holds only unreleased work plus
+one archive per closed minor line. The root file stays short: it carries only the
+line being released into, and links the archives.
 
 Writes nothing outside a scratch directory.
 """
@@ -64,7 +64,8 @@ def main():
     print(f"{'bytes under .changes/':24} {sum(p.stat().st_size for p in files):>8,}")
     print(f"{'CHANGELOG.md lines':24} {len(text.splitlines()):>8,}")
     print(f"{'CHANGELOG.md bytes':24} {len(text.encode()):>8,}")
-    print(f"{'sections rendered':24} {text.count('## ['):>8}")
+    print(f"{'sections in the root':24} {text.count('## ['):>8}")
+    print(f"{'archived lines':24} {len(list(changes.glob('*.x.md'))):>8}")
     shutil.rmtree(work)
 
 

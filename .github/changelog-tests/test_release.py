@@ -25,12 +25,13 @@ def test_a_release_renders_its_section_and_drops_the_fragments(tmp_path):
 
 
 def test_the_newest_release_sits_above_the_older_ones(tmp_path):
+    # Two patches, so both stay in the root: a minor bump would archive the first.
     _seed(tmp_path, 1, "feat: First")
     _rollup(tmp_path, "1.0.2", "2026-09-06")
     _seed(tmp_path, 2, "feat: Second")
-    _rollup(tmp_path, "1.1.0", "2026-09-10")
+    _rollup(tmp_path, "1.0.3", "2026-09-10")
     text = _changelog(tmp_path)
-    assert text.index("## [1.1.0]") < text.index("## [1.0.2]")
+    assert text.index("## [1.0.3]") < text.index("## [1.0.2]")
     # A blank line between them, or the sections run together when rendered.
     assert "\n\n## [1.0.2]" in text
 
@@ -40,7 +41,7 @@ def test_a_released_section_is_never_rewritten(tmp_path):
     _rollup(tmp_path, "1.0.2", "2026-09-06")
     before = _changelog(tmp_path).split("## [1.0.2]", 1)[1]
     _seed(tmp_path, 2, "feat: Second")
-    _rollup(tmp_path, "1.1.0", "2026-09-10")
+    _rollup(tmp_path, "1.0.3", "2026-09-10")
     assert _changelog(tmp_path).split("## [1.0.2]", 1)[1] == before
 
 
@@ -115,3 +116,58 @@ def test_a_release_preserves_hand_written_content(tmp_path):
     text = _changelog(tmp_path)
     assert "Official release of 1.0.0." in text
     assert text.index("## [1.0.2]") < text.index("## [1.0.0]")
+
+
+def test_a_new_minor_line_archives_the_old_one(tmp_path):
+    _seed(tmp_path, 1, "feat: First")
+    _rollup(tmp_path, "1.0.2", "2026-09-01")
+    _seed(tmp_path, 2, "fix: Second")
+    _rollup(tmp_path, "1.0.3", "2026-09-05")
+    _seed(tmp_path, 3, "feat: Third")
+    _rollup(tmp_path, "1.1.0", "2026-09-10")
+
+    root = _changelog(tmp_path)
+    # The root carries only the line being released into, plus a link out.
+    assert "## [1.1.0]" in root
+    assert "## [1.0.2]" not in root and "## [1.0.3]" not in root
+    assert "- [1.0.x](.changes/1.0.x.md)" in root
+
+    archive = (tmp_path / ".changes" / "1.0.x.md").read_text()
+    assert archive.startswith("# Changelog — 1.0.x")
+    assert "## [1.0.3]" in archive and "## [1.0.2]" in archive
+    assert "## [1.1.0]" not in archive
+    # One directory deeper, so the links need one more `..`.
+    assert "(../../../pull/1)" in archive
+    assert "(../CHANGELOG.md)" in archive
+
+
+def test_a_patch_archives_nothing(tmp_path):
+    _seed(tmp_path, 1, "feat: First")
+    _rollup(tmp_path, "1.0.2", "2026-09-01")
+    _seed(tmp_path, 2, "fix: Second")
+    _rollup(tmp_path, "1.0.3", "2026-09-05")
+    assert list((tmp_path / ".changes").glob("*.x.md")) == []
+    root = _changelog(tmp_path)
+    assert "## [1.0.2]" in root and "## [1.0.3]" in root
+
+
+def test_archived_lines_are_listed_newest_first(tmp_path):
+    # Sorted on the numbers, not the text: 1.10.x is newer than 1.2.x.
+    _changes(tmp_path)
+    for line in ("1.0.x", "1.2.x", "1.10.x"):
+        (tmp_path / ".changes" / f"{line}.md").write_text(f"# Changelog — {line}\n")
+    _seed(tmp_path, 1, "feat: A thing")
+    _rollup(tmp_path, "1.11.0", "2026-09-10")
+    listed = _changelog(tmp_path).split("## Earlier releases", 1)[1]
+    assert [ln.strip() for ln in listed.strip().splitlines()] == [
+        "- [1.10.x](.changes/1.10.x.md)",
+        "- [1.2.x](.changes/1.2.x.md)",
+        "- [1.0.x](.changes/1.0.x.md)",
+    ]
+
+
+def test_the_first_release_of_all_archives_nothing(tmp_path):
+    _seed(tmp_path, 1, "feat: First")
+    assert _rollup(tmp_path, "1.0.2", "2026-09-01") == 0
+    assert list((tmp_path / ".changes").glob("*.x.md")) == []
+    assert "Earlier releases" not in _changelog(tmp_path)

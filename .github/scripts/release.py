@@ -7,10 +7,17 @@ import re
 from pathlib import Path
 
 from fragments import _err, load_preview
-from render import insert_release, render_release_section, set_region, \
-    unreleased_pointer
+from render import archive_line, earlier_releases, insert_release, \
+    render_release_section, set_earlier, set_region, unreleased_pointer
 
 ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+VERSION_RE = re.compile(r"(\d+)\.(\d+)\.\d+")
+
+
+def _line(text):
+    """(major, minor) of the first version in `text`, or None if there is none."""
+    m = VERSION_RE.search(text)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
 
 def cmd_rollup(args):
@@ -43,7 +50,16 @@ def cmd_rollup(args):
     # The release branch's region is the pointer, not the unreleased list: only a
     # release rewrites this file, so a list of unreleased changes would sit stale.
     text = set_region(text, unreleased_pointer(args.docs_branch))
-    path.write_text(insert_release(text, section))
+
+    # A new minor line closes the old one: its sections move to an archive, so the
+    # root only ever carries the line being released into.
+    closing = _line(text.partition("\n## [")[2])
+    if closing and closing != _line(args.version):
+        text, archive = archive_line(text, f"{closing[0]}.{closing[1]}.x")
+        (changes / f"{closing[0]}.{closing[1]}.x.md").write_text(archive)
+
+    path.write_text(set_earlier(insert_release(text, section),
+                                earlier_releases(changes)))
 
     for f in on_disk:
         f.unlink()

@@ -113,6 +113,13 @@ jobs:
             'head, _, tail = text.partition(END)' 'head, tail = skeleton(""), ""'
           mutate "a refresh drops everything below the region" \
             '_, _, tail = rest.partition(END)' 'tail = ""'
+          mutate "a closed minor line is never archived" \
+            'if closing and closing != _line(args.version):' 'if False:'
+          mutate "an archived link is left pointing one level too high" \
+            '.replace("](../../pull/", "](../../../pull/")' '.replace("](../../pull/", "](../../pull/")'
+          mutate "the archived lines are listed oldest first" 'reverse=True,' 'reverse=False,'
+          mutate "the list of archived lines is never written" \
+            'return body + (f"\\n{listing}" if listing else "")' 'return body'
           mutate "a chore renders as an entry" \
             'if f["type"] == pr_type and f["pr"] not in minor_prs]' 'if f["pr"] not in minor_prs]'
 
@@ -290,6 +297,15 @@ jobs:
           [[ -z "$(sed -n "$((OLD_AT-1))p" CHANGELOG.md)" ]] \
             || { echo "sections run together" >&2; exit 1; }
           echo "newest release on top, older one untouched"
+
+          # --- the minor bump archived the closed line
+          [[ -f .changes/1.0.x.md ]] || { echo "no archive written" >&2; exit 1; }
+          grep -qF "## [1.0.2]" .changes/1.0.x.md
+          ! grep -qF "## [1.0.2]" CHANGELOG.md
+          grep -qF "- [1.0.x](.changes/1.0.x.md)" CHANGELOG.md
+          # One directory deeper, so the links gained a level.
+          grep -qF "(../../../pull/1283)" .changes/1.0.x.md
+          echo "1.0.x archived, root links it"
 
           # --- a re-run of the release job must not add a second section
           echo "=== retry"

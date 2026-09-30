@@ -10,6 +10,8 @@ from pathlib import Path
 from fragments import BREAKING_SECTION, CATEGORY, load_preview
 
 HEADING = "# Changelog"
+# Archived lines are listed last, after every release section.
+EARLIER = "## Earlier releases"
 # The region is bounded by markers rather than found by position, so an editor
 # adding prose around it cannot move what gets replaced.
 START = "<!-- changelog:unreleased -->"
@@ -104,6 +106,43 @@ def insert_release(text, section):
     head, _, tail = text.partition(END)
     body = f"{head}{END}\n\n{section.rstrip()}\n\n{tail.lstrip()}"
     return body.rstrip() + "\n"
+
+
+def earlier_releases(changes_dir):
+    """Links to the archived lines, newest first, or '' when there are none.
+
+    Built from the files present rather than from a list kept in the file, so an
+    archive written by hand at adoption is picked up without being registered.
+    """
+    d = Path(changes_dir)
+    files = sorted(d.glob("*.x.md"), reverse=True,
+                   key=lambda p: [int(x) for x in p.name.split(".")[:2]]) if d.exists() else []
+    if not files:
+        return ""
+    return (f"{EARLIER}\n\n"
+            + "\n".join(f"- [{p.stem}]({d.name}/{p.name})" for p in files) + "\n")
+
+
+def set_earlier(text, listing):
+    """Replace the trailing list of archived lines."""
+    body = text.partition("\n" + EARLIER)[0].rstrip() + "\n"
+    return body + (f"\n{listing}" if listing else "")
+
+
+def archive_line(text, line):
+    """Move the released sections out of the root and into one archive file.
+
+    The root only ever holds the current line, so everything below the unreleased
+    region *is* that line: nothing needs reading to decide what belongs. The
+    caller only reaches here having found a release section, so there is one.
+    """
+    head, _, body = text.partition(END)
+    at = body.find("\n## ")
+    # The archive sits one directory down, so every link needs one more `..`.
+    moved = set_earlier(body[at + 1:], "").replace("](../../pull/", "](../../../pull/")
+    return (head + END + body[:at + 1].rstrip() + "\n",
+            f"{HEADING} — {line}\n\nCurrent releases are in the "
+            f"[top-level changelog](../CHANGELOG.md).\n\n{moved.strip()}\n")
 
 
 def cmd_render(args):
