@@ -9,7 +9,7 @@ Nothing before 1.0.0 is in the changelog: those releases shipped without fragmen
 .changes/<M>.<N>.x.md          a closed minor line, moved out of the root
 ```
 
-The rendered file is the record — it is never regenerated, so a published entry cannot change under a reader. The root holds the line currently being released into; when a new minor opens, the closed line's sections move to `.changes/<M>.<N>.x.md` and the root links it under Earlier releases.
+The rendered file is the record — it is never regenerated, so a published entry cannot change under a reader. The root holds the minor version line currently being released into; when a new minor opens, the closed line's sections move to `.changes/<M>.<N>.x.md` and the root links it under Earlier releases.
 
 ## Fragment schema
 

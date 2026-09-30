@@ -137,9 +137,10 @@ def set_earlier(text, listing):
 def archive_line(text, line):
     """Move the released sections out of the root and into one archive file.
 
-    The root only ever holds the current line, so everything below the unreleased
-    region *is* that line: nothing needs reading to decide what belongs. The
-    caller only reaches here having found a release section, so there is one.
+    The root only ever holds the current minor version line, so everything below
+    the unreleased region *is* that line: nothing needs reading to decide what
+    belongs. The caller only reaches here having found a release section, so there
+    is one.
     """
     head, _, body = text.partition(END)
     at = body.find("\n## ")

@@ -59,8 +59,9 @@ def cmd_rollup(args):
     # release rewrites this file, so a list of unreleased changes would sit stale.
     text = set_region(text, unreleased_pointer(args.docs_branch))
 
-    # A new minor line closes the old one: its sections move to an archive, so the
-    # root only ever carries the line being released into. Nothing to close if
+    # A new minor version line closes the old one: its sections move to an
+    # archive, so the root only ever carries the line being released into. Nothing
+    # to close if
     # this release renders nothing, or if either version does not parse.
     closing = _line(text.partition("\n## [")[2])
     opening = _line(args.version)
