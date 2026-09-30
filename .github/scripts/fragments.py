@@ -77,6 +77,11 @@ def validate_fragment(path):
         # fragment agrees with the --pr its trigger fired for. What is left is
         # the placeholder, which renders as a dead `(#0)` reference.
         errs.append(f"{path}: pr must be the real pull request number, not {pr}")
+    for field in ("summary", "notes"):
+        # An entry is rendered inside a marked region. Text that closes the marker
+        # would break every later render of the file.
+        if isinstance(data.get(field), str) and "<!--" in data[field]:
+            errs.append(f"{path}: {field} must not contain an HTML comment")
     notes = data.get("notes", "")
     if not isinstance(notes, str):
         errs.append(f"{path}: notes must be a string")
@@ -94,8 +99,6 @@ def load_preview(changes_dir):
     """Every valid fragment awaiting release. Invalid ones warn and drop out, so
     one bad fragment cannot stop the unreleased view from rendering."""
     d = Path(changes_dir) / "preview"
-    if not d.exists():
-        return []
     out = []
     for path in sorted(d.glob("*.json")):
         errs = validate_fragment(path)

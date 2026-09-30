@@ -8,12 +8,8 @@ import sys
 
 def parse_changed_paths(path, prefix):
     """Read `status<TAB>path` lines, keeping only entries under `prefix`."""
-    out = []
-    for line in Path(path).read_text().splitlines():
-        status, _, p = line.strip().partition("\t")
-        if p.startswith(f"{prefix}/"):
-            out.append((status, p))
-    return out
+    rows = (ln.strip().partition("\t") for ln in Path(path).read_text().splitlines())
+    return [(status, p) for status, _, p in rows if p.startswith(f"{prefix}/")]
 
 
 def check_fragment_changes(args, pr_type, reason):

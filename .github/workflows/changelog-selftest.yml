@@ -108,13 +108,24 @@ jobs:
             'if len(fragments) != len(on_disk):' 'if False:'
           mutate "a malformed date is accepted" 'if not ISO_DATE_RE.match(args.date):' 'if False:'
           mutate "the abi label stops deciding the breaking section" \
-            'breaking = [f for f in fragments if f["pr"] in minor_prs]' 'breaking = []'
+            'if f["pr"] in minor_prs and f["type"] in CATEGORY]' 'if False]'
+          mutate "a labelled chore is rendered as breaking" \
+            'and f["type"] in CATEGORY]' ']'
           mutate "a release rewrites what is already published" \
             'head, _, tail = text.partition(END)' 'head, tail = skeleton(""), ""'
           mutate "a refresh drops everything below the region" \
             '_, _, tail = rest.partition(END)' 'tail = ""'
           mutate "a closed minor line is never archived" \
-            'if closing and closing != _line(args.version):' 'if False:'
+            'if section and closing and opening and closing != opening:' 'if False:'
+          mutate "an empty release still archives the old line" \
+            'if section and closing' 'if closing'
+          mutate "an existing archive is silently overwritten" \
+            'if target.exists() and target.read_text() != archive:' 'if False:'
+          mutate "the line is read from prose instead of the heading" \
+            'VERSION_RE.match(text)' 'VERSION_RE.search(text)'
+          mutate "a marker can be smuggled into an entry" 'if isinstance(data.get(field), str)' 'if False'
+          mutate "minor-prs is not checked for numbers" \
+            'if not all(p.isdigit() for p in labelled):' 'if False:'
           mutate "an archived link is left pointing one level too high" \
             '.replace("](../../pull/", "](../../../pull/")' '.replace("](../../pull/", "](../../pull/")'
           mutate "the archived lines are listed oldest first" 'reverse=True,' 'reverse=False,'

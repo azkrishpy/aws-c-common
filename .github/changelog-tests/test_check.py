@@ -152,3 +152,38 @@ def test_changes_outside_the_changes_dir_are_ignored(tmp_path):
     assert _check_paths(tmp_path, 1259, "feat: x", p) == 0
 
 
+
+
+def test_every_reason_the_gate_can_emit_is_exercised(tmp_path, capsys):
+    """The reason tag is the action's only machine-readable output."""
+    seen = set()
+
+    def reason_of(rc_call):
+        rc_call()
+        out = capsys.readouterr().out
+        for line in out.splitlines():
+            if line.startswith("CHANGELOG_CHECK_REASON::"):
+                seen.add(line.split("::", 1)[1])
+
+    reason_of(lambda: _check(tmp_path, 1, "feat: x", bot="dependabot[bot]"))
+    reason_of(lambda: _check(tmp_path, 1, "nonsense title"))
+    reason_of(lambda: _check(tmp_path, 1, "chore: tidy"))
+    reason_of(lambda: _check(tmp_path, 2, "feat: missing its fragment"))
+    _write(tmp_path, 3, "feat", summary="")
+    reason_of(lambda: _check(tmp_path, 3, "feat: invalid"))
+    _changes(tmp_path)
+    (tmp_path / ".changes" / "preview" / "4.json").write_text(json.dumps(
+        {"pr": 9, "type": "feat", "summary": "s", "notes": ""}))
+    reason_of(lambda: _check(tmp_path, 4, "feat: mismatched number"))
+    _write(tmp_path, 5, "fix")
+    reason_of(lambda: _check(tmp_path, 5, "feat: mismatched type"))
+    _write(tmp_path, 6, "feat")
+    reason_of(lambda: _check(tmp_path, 6, "feat: good"))
+    paths = _paths(tmp_path, ("added", ".changes/preview/99.json"))
+    reason_of(lambda: _check_paths(tmp_path, 7, "feat: someone else's", paths))
+    paths = _paths(tmp_path, ("modified", ".changes/preview/8.json"))
+    reason_of(lambda: _check_paths(tmp_path, 8, "feat: rewritten", paths))
+
+    assert seen == {"waived-bot", "bad-title", "exempt-type", "missing-fragment",
+                    "invalid-fragment", "pr-mismatch", "type-mismatch", "ok",
+                    "stray-fragment", "modified-fragment"}

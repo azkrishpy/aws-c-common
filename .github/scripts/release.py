@@ -15,8 +15,12 @@ VERSION_RE = re.compile(r"(\d+)\.(\d+)\.\d+")
 
 
 def _line(text):
-    """(major, minor) of the first version in `text`, or None if there is none."""
-    m = VERSION_RE.search(text)
+    """(major, minor) of the version `text` starts with, or None.
+
+    Anchored: searching would match a version inside an entry's prose and archive
+    the wrong line.
+    """
+    m = VERSION_RE.match(text)
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
@@ -42,7 +46,11 @@ def cmd_rollup(args):
              f"fix them first")
         return 2
 
-    minor_prs = {int(p) for p in args.minor_prs.split(",") if p.strip()}
+    labelled = [p.strip() for p in args.minor_prs.split(",") if p.strip()]
+    if not all(p.isdigit() for p in labelled):
+        _err(f"--minor-prs must be pull request numbers, got {args.minor_prs!r}")
+        return 2
+    minor_prs = {int(p) for p in labelled}
     section = render_release_section(args.version, args.date, fragments, minor_prs)
 
     path = Path(args.changelog)
@@ -52,11 +60,20 @@ def cmd_rollup(args):
     text = set_region(text, unreleased_pointer(args.docs_branch))
 
     # A new minor line closes the old one: its sections move to an archive, so the
-    # root only ever carries the line being released into.
+    # root only ever carries the line being released into. Nothing to close if
+    # this release renders nothing, or if either version does not parse.
     closing = _line(text.partition("\n## [")[2])
-    if closing and closing != _line(args.version):
+    opening = _line(args.version)
+    if section and closing and opening and closing != opening:
         text, archive = archive_line(text, f"{closing[0]}.{closing[1]}.x")
-        (changes / f"{closing[0]}.{closing[1]}.x.md").write_text(archive)
+        target = changes / f"{closing[0]}.{closing[1]}.x.md"
+        if target.exists() and target.read_text() != archive:
+            # An archive is the permanent record for a line. Overwriting it would
+            # delete released entries; an identical write is a retry, so allow it.
+            _err(f"{target} already exists with different content; releasing "
+                 f"{args.version} would overwrite it")
+            return 2
+        target.write_text(archive)
 
     path.write_text(set_earlier(insert_release(text, section),
                                 earlier_releases(changes)))

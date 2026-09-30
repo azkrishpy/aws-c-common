@@ -171,3 +171,64 @@ def test_the_first_release_of_all_archives_nothing(tmp_path):
     assert _rollup(tmp_path, "1.0.2", "2026-09-01") == 0
     assert list((tmp_path / ".changes").glob("*.x.md")) == []
     assert "Earlier releases" not in _changelog(tmp_path)
+
+
+def test_archiving_refuses_to_overwrite_a_different_archive(tmp_path):
+    # An archive is the permanent record for a line. Releasing into a line whose
+    # archive already says something else would delete released entries.
+    _seed(tmp_path, 1, "feat: First")
+    _rollup(tmp_path, "1.0.2", "2026-09-01")
+    (tmp_path / ".changes" / "1.0.x.md").write_text("# Changelog — 1.0.x\n\nsomething else\n")
+    _seed(tmp_path, 2, "feat: Second")
+    assert _rollup(tmp_path, "1.1.0", "2026-09-10") == 2
+    assert "something else" in (tmp_path / ".changes" / "1.0.x.md").read_text()
+
+
+def test_re_archiving_identical_content_is_allowed(tmp_path):
+    # A crash between writing the archive and writing the root leaves the archive
+    # behind; the retry writes the same bytes and must not be refused.
+    _seed(tmp_path, 1, "feat: First")
+    _rollup(tmp_path, "1.0.2", "2026-09-01")
+    before = _changelog(tmp_path)
+    _seed(tmp_path, 2, "feat: Second")
+    _rollup(tmp_path, "1.1.0", "2026-09-10")
+    archived = (tmp_path / ".changes" / "1.0.x.md").read_text()
+    # Rewind the root and re-run: the archive is already there, byte for byte.
+    (tmp_path / "CHANGELOG.md").write_text(before)
+    _seed(tmp_path, 3, "feat: Second again")
+    assert _rollup(tmp_path, "1.1.0", "2026-09-10") == 0
+    assert (tmp_path / ".changes" / "1.0.x.md").read_text() == archived
+
+
+def test_a_release_with_no_section_archives_nothing(tmp_path):
+    # Archiving on a chore-only release would empty the root and put nothing back.
+    _seed(tmp_path, 1, "feat: First")
+    _rollup(tmp_path, "1.0.2", "2026-09-01")
+    _seed(tmp_path, 2, "chore: Internal only")
+    assert _rollup(tmp_path, "1.1.0", "2026-09-10") == 0
+    assert list((tmp_path / ".changes").glob("*.x.md")) == []
+    assert "## [1.0.2]" in _changelog(tmp_path)
+
+
+def test_the_line_is_read_from_the_first_heading_only(tmp_path):
+    """A first section that is not a version means the line is unknown.
+
+    Searching the rest of the document instead would find a later version and
+    archive against it, sweeping the unversioned section away with it.
+    """
+    _changes(tmp_path)
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [Unreleased notes]\n\nHand-written.\n\n"
+        "## [1.0.2] — 2026-09-01\n\n### Fixes\n- Old. ([#1](../../pull/1))\n")
+    _seed(tmp_path, 2, "feat: Next line")
+    assert _rollup(tmp_path, "1.1.0", "2026-09-10") == 0
+    assert list((tmp_path / ".changes").glob("*.x.md")) == []
+    text = _changelog(tmp_path)
+    assert "Hand-written." in text and "## [1.0.2]" in text
+
+
+def test_a_non_numeric_minor_prs_is_a_caller_error(tmp_path):
+    _seed(tmp_path, 1, "feat: First")
+    assert _rollup(tmp_path, "1.0.2", "2026-09-01", minor_prs="oops") == 2
+    assert not (tmp_path / "CHANGELOG.md").exists()
+    assert (tmp_path / ".changes" / "preview" / "1.json").exists()

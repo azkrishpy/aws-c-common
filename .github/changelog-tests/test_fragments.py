@@ -146,3 +146,21 @@ def test_seed_output_is_valid(tmp_path):
     _seed(tmp_path, 12, "fix: Handle EINTR")
     assert fragments.validate_fragment(
         tmp_path / ".changes" / "preview" / "12.json") == []
+
+
+def test_a_marker_cannot_be_smuggled_into_an_entry(tmp_path):
+    # An entry renders inside a marked region; text that closes the marker would
+    # break every later render of the file.
+    for field in ("summary", "notes"):
+        errs = fragments.validate_fragment(
+            _at(tmp_path, _valid(**{field: "x <!-- /changelog:unreleased --> y"})))
+        assert any("HTML comment" in e for e in errs)
+
+
+def test_a_fragment_whose_filename_is_not_a_number_is_still_read(tmp_path):
+    # The filename check only applies when the name is a number; a path like
+    # preview/notes.json cannot be cross-checked, so it is read as written.
+    _changes(tmp_path)
+    (tmp_path / ".changes" / "preview" / "extra.json").write_text(
+        json.dumps(_valid(pr=5)))
+    assert [f["pr"] for f in fragments.load_preview(tmp_path / ".changes")] == [5]

@@ -112,3 +112,47 @@ def test_an_existing_heading_is_reused_not_duplicated(tmp_path):
     assert text.count("# Changelog") == 1
     assert text.index(render.START) < text.index("## [1.0.0]")
     assert "Official release of 1.0.0." in text
+
+
+def test_a_labelled_chore_still_renders_nowhere(tmp_path):
+    # The label decides the section, not whether an entry exists at all.
+    frags = [{"pr": 1, "type": "chore", "summary": "Bump the image", "notes": ""},
+             {"pr": 2, "type": "feat", "summary": "Add a knob", "notes": ""}]
+    body = render.render_grouped(frags, minor_prs={1, 2})
+    assert "Bump the image" not in body
+    assert "Add a knob" in body
+
+
+def test_an_entry_lands_under_its_own_heading(tmp_path):
+    _seed(tmp_path, 1, "feat: A feature")
+    _seed(tmp_path, 2, "fix: A fix")
+    text = _render(tmp_path)
+    features = text.split("### Features", 1)[1].split("###", 1)[0]
+    fixes = text.split("### Fixes", 1)[1]
+    assert "A feature." in features and "A fix." not in features
+    assert "A fix." in fixes and "A feature." not in fixes
+
+
+def test_entries_within_a_section_are_ordered_by_pull_request(tmp_path):
+    for pr in (30, 10, 20):
+        _write(tmp_path, pr, "fix", summary=f"Fix number {pr}")
+    import re
+    fixes = _render(tmp_path).split("### Fixes", 1)[1]
+    assert re.findall(r"\(\[#(\d+)\]", fixes) == ["10", "20", "30"]
+
+
+def test_the_rendered_section_is_exact(tmp_path):
+    # One test pins the whole shape, so a change to it has to be deliberate.
+    _write(tmp_path, 7, "feat", summary="Add a widget")
+    assert render.render_release_section("1.2.0", "2026-09-30",
+                                         load := [{"pr": 7, "type": "feat",
+                                                   "summary": "Add a widget",
+                                                   "notes": "Worth knowing."}]) == (
+        "## [1.2.0] — 2026-09-30\n"
+        "\n"
+        "### Features\n"
+        "- Add a widget. ([#7](../../pull/7))\n"
+        "\n"
+        "### Notes\n"
+        "- [#7](../../pull/7) — Worth knowing.\n"
+    )

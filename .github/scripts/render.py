@@ -46,7 +46,10 @@ def _section(heading, entries, render):
 
 def render_grouped(fragments, minor_prs=()):
     """Sections in a fixed order, each omitted when it would be empty."""
-    breaking = [f for f in fragments if f["pr"] in minor_prs]
+    # A chore renders nowhere, so a chore whose pull request carries the label
+    # does not surface here either.
+    breaking = [f for f in fragments
+                if f["pr"] in minor_prs and f["type"] in CATEGORY]
     lines = _section(BREAKING_SECTION, breaking, render_entry)
     for pr_type, cat in CATEGORY.items():
         rest = [f for f in fragments
@@ -80,8 +83,10 @@ def render_unreleased(fragments):
     return "## [Unreleased]\n\n" + (render_grouped(fragments) or "_Nothing yet._\n")
 
 
-def skeleton(region):
-    return f"{HEADING}\n\n{START}\n{region}{END}\n"
+def skeleton(region="", heading=HEADING, rest=""):
+    """The file's shape: a heading, the region, then whatever was already there."""
+    return (f"{heading}\n\n{START}\n{region}{END}\n"
+            + (f"\n{rest}" if rest.strip() else ""))
 
 
 def set_region(text, region):
@@ -92,12 +97,11 @@ def set_region(text, region):
         return f"{head}{START}\n{region}{END}{tail}"
     body = text.lstrip("\n")
     if body.startswith("# "):
-        # The file already has its heading -- an adopting repo has one. Put the
-        # region under it rather than adding a second heading above it.
+        # The file already has its heading -- an adopting repo has one. Reuse it
+        # rather than adding a second heading above it.
         heading, _, rest = body.partition("\n")
-        rest = rest.lstrip("\n")
-        return f"{heading}\n\n{START}\n{region}{END}\n" + (f"\n{rest}" if rest else "")
-    return skeleton(region) + (f"\n{body}" if body.strip() else "")
+        return skeleton(region, heading, rest.lstrip("\n"))
+    return skeleton(region, rest=body)
 
 
 def insert_release(text, section):
@@ -117,7 +121,7 @@ def earlier_releases(changes_dir):
     """
     d = Path(changes_dir)
     files = sorted(d.glob("*.x.md"), reverse=True,
-                   key=lambda p: [int(x) for x in p.name.split(".")[:2]]) if d.exists() else []
+                   key=lambda p: [int(x) for x in p.name.split(".")[:2]])
     if not files:
         return ""
     return (f"{EARLIER}\n\n"
