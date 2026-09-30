@@ -100,3 +100,14 @@ def test_the_pointer_links_only_when_the_branch_name_resolves():
     assert "(../../tree/docs/CHANGELOG.md)" in render.unreleased_pointer("docs")
     slashed = render.unreleased_pointer("team/docs")
     assert "`team/docs`" in slashed and "../../tree/team/docs" not in slashed
+
+
+def test_an_existing_heading_is_reused_not_duplicated(tmp_path):
+    # An adopting repo already has `# Changelog`; a second one renders as two
+    # titles stacked on top of each other.
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [1.0.0]\n\nOfficial release of 1.0.0.\n")
+    text = _render(tmp_path)
+    assert text.count("# Changelog") == 1
+    assert text.index(render.START) < text.index("## [1.0.0]")
+    assert "Official release of 1.0.0." in text

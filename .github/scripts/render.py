@@ -82,12 +82,19 @@ def skeleton(region):
 
 
 def set_region(text, region):
-    """Replace the unreleased region, creating the file's skeleton if absent."""
-    if START not in text or END not in text:
-        return skeleton(region) + ("\n" + text.lstrip("\n") if text.strip() else "")
-    head, _, rest = text.partition(START)
-    _, _, tail = rest.partition(END)
-    return f"{head}{START}\n{region}{END}{tail}"
+    """Replace the unreleased region, adding it on a first run."""
+    if START in text and END in text:
+        head, _, rest = text.partition(START)
+        _, _, tail = rest.partition(END)
+        return f"{head}{START}\n{region}{END}{tail}"
+    body = text.lstrip("\n")
+    if body.startswith("# "):
+        # The file already has its heading -- an adopting repo has one. Put the
+        # region under it rather than adding a second heading above it.
+        heading, _, rest = body.partition("\n")
+        rest = rest.lstrip("\n")
+        return f"{heading}\n\n{START}\n{region}{END}\n" + (f"\n{rest}" if rest else "")
+    return skeleton(region) + (f"\n{body}" if body.strip() else "")
 
 
 def insert_release(text, section):
