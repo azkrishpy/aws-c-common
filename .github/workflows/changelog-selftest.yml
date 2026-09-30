@@ -119,7 +119,7 @@ jobs:
             '.replace("](../../pull/", "](../../../pull/")' '.replace("](../../pull/", "](../../pull/")'
           mutate "the archived lines are listed oldest first" 'reverse=True,' 'reverse=False,'
           mutate "the list of archived lines is never written" \
-            'return body + (f"\\n{listing}" if listing else "")' 'return body'
+            'if listing else ""' 'if False else ""'
           mutate "a chore renders as an entry" \
             'if f["type"] == pr_type and f["pr"] not in minor_prs]' 'if f["pr"] not in minor_prs]'
 
@@ -284,28 +284,38 @@ jobs:
           grep -qF "Official release of 1.0.0." CHANGELOG.md
           cp CHANGELOG.md /tmp/after-patch.md
 
-          # --- a second release sits above the first, which is left alone
-          printf '{"pr":1290,"type":"feat","summary":"New retry strategy","notes":""}\n' \
-            > .changes/preview/1290.json
-          echo "=== release 1.1.0"
-          python3 "${CL}" rollup --version 1.1.0 --date 2026-10-01 \
+          # --- a second patch sits above the first, in the same line
+          printf '{"pr":1288,"type":"fix","summary":"Handle EINTR","notes":""}\n' \
+            > .changes/preview/1288.json
+          echo "=== patch 1.0.3"
+          python3 "${CL}" rollup --version 1.0.3 --date 2026-09-05 \
             --changes-dir .changes --changelog CHANGELOG.md
-          NEW_AT=$(grep -n '^## \[1.1.0\]' CHANGELOG.md | cut -d: -f1)
+          NEW_AT=$(grep -n '^## \[1.0.3\]' CHANGELOG.md | cut -d: -f1)
           OLD_AT=$(grep -n '^## \[1.0.2\]' CHANGELOG.md | cut -d: -f1)
           [[ "$NEW_AT" -lt "$OLD_AT" ]] || { echo "release order wrong" >&2; exit 1; }
           # A blank line above the older one, or the sections run together.
           [[ -z "$(sed -n "$((OLD_AT-1))p" CHANGELOG.md)" ]] \
             || { echo "sections run together" >&2; exit 1; }
-          echo "newest release on top, older one untouched"
+          [[ ! -f .changes/1.0.x.md ]] || { echo "a patch archived" >&2; exit 1; }
+          echo "newest patch on top, nothing archived"
 
-          # --- the minor bump archived the closed line
+          # --- a new minor line closes the old one
+          printf '{"pr":1290,"type":"feat","summary":"New retry strategy","notes":""}\n' \
+            > .changes/preview/1290.json
+          echo "=== release 1.1.0"
+          python3 "${CL}" rollup --version 1.1.0 --date 2026-10-01 \
+            --changes-dir .changes --changelog CHANGELOG.md
           [[ -f .changes/1.0.x.md ]] || { echo "no archive written" >&2; exit 1; }
+          grep -qF "## [1.0.3]" .changes/1.0.x.md
           grep -qF "## [1.0.2]" .changes/1.0.x.md
+          # The pre-adoption section went with the line it belongs to.
+          grep -qF "Official release of 1.0.0." .changes/1.0.x.md
           ! grep -qF "## [1.0.2]" CHANGELOG.md
-          grep -qF "- [1.0.x](.changes/1.0.x.md)" CHANGELOG.md
-          # One directory deeper, so the links gained a level.
+          grep -qF -- "- [1.0.x](.changes/1.0.x.md)" CHANGELOG.md
+          # One directory deeper, so every link in the archive gained a level.
           grep -qF "(../../../pull/1283)" .changes/1.0.x.md
-          echo "1.0.x archived, root links it"
+          grep -qF "(../../pull/1290)" CHANGELOG.md
+          echo "1.0.x archived, root carries only 1.1.x and links out"
 
           # --- a re-run of the release job must not add a second section
           echo "=== retry"
@@ -313,6 +323,8 @@ jobs:
             --changes-dir .changes --changelog CHANGELOG.md
           [[ "$(grep -c '^## \[1.1.0\]' CHANGELOG.md)" == "1" ]] \
             || { echo "retry duplicated the section" >&2; exit 1; }
+          [[ "$(ls .changes/*.x.md | wc -l)" == "1" ]] \
+            || { echo "retry archived again" >&2; exit 1; }
           echo "retry changed nothing"
 
           # --- an invalid fragment stops a release rather than losing the entry
@@ -329,6 +341,7 @@ jobs:
           mkdir -p "$SIM"
           cp /tmp/after-patch.md "$SIM/after-patch-1.0.2.md"
           cp CHANGELOG.md "$SIM/after-release-1.1.0.md"
+          cp .changes/1.0.x.md "$SIM/archived-1.0.x.md"
           find .changes -type f | sort > "$SIM/final-tree.txt"
           { echo "### After the simulated releases"; echo '```markdown';
             cat CHANGELOG.md; echo '```';

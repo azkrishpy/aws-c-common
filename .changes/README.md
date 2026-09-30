@@ -9,10 +9,13 @@ fragments, and nothing backfills them.
 
 ```
 .changes/preview/<PR>.json     awaiting release, written by the PR author
+.changes/<M>.<N>.x.md          a closed minor line, moved out of the root
 ```
 
-That is the whole layout. The rendered file is the record — it is never
-regenerated, so a published entry cannot change under a reader.
+The rendered file is the record — it is never regenerated, so a published entry
+cannot change under a reader. The root holds the line currently being released
+into; when a new minor opens, the closed line's sections move to
+`.changes/<M>.<N>.x.md` and the root links it under Earlier releases.
 
 ## Fragment schema
 
@@ -44,7 +47,8 @@ A CI-only or pure-infra change is a `chore`.
 
 | You want | Look here |
 |---|---|
-| already released | [`CHANGELOG.md`](../CHANGELOG.md), newest release first |
+| released in the current minor line | [`CHANGELOG.md`](../CHANGELOG.md), newest first |
+| released in an earlier line | `.changes/<M>.<N>.x.md`, linked from the root |
 | merged but unreleased | `preview/*.json`, or the rendered view on the `docs` branch |
 | the fragment behind a released entry | `git log -- .changes` |
 | the exact set for a tag | the GitHub Release page for that tag |
