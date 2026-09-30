@@ -1,29 +1,18 @@
 # Changelog fragments
 
-Individual changes are recorded here as JSON fragments — one per PR. The
-top-level [`CHANGELOG.md`](../CHANGELOG.md) is derived from these.
+A pull request records its change here as one JSON fragment. A release renders
+the fragments into the top-level [`CHANGELOG.md`](../CHANGELOG.md) and deletes
+them, so this directory only ever holds what has not shipped yet.
 
 Nothing before 1.0.0 is in the changelog: those releases shipped without
-fragments, so rolling one up would publish entries that do not exist.
-
-## Directory layout
+fragments, and nothing backfills them.
 
 ```
-.changes/
-├── preview/<PR>.json          # in-flight, written by the PR author
-├── released/<PR>.json         # shipped; carries its version and date
-├── <M>.<N>.x.md               # archive of a closed minor line
-└── …
+.changes/preview/<PR>.json     awaiting release, written by the PR author
 ```
 
-A fragment is the only state. `version` and `date` are stamped onto it at
-release, so a release has no side file of its own — the releases in `released/`
-are those fragments grouped by the version they carry.
-
-Archiving a minor line deletes its fragments and keeps only `<M>.<N>.x.md`.
-Nothing reads an archived fragment and the file is never regenerated. Keeping
-them would add one checked-out file per merged PR forever; `git log -- .changes`
-still has every one.
+That is the whole layout. The rendered file is the record — it is never
+regenerated, so a published entry cannot change under a reader.
 
 ## Fragment schema
 
@@ -40,19 +29,21 @@ still has every one.
 |---|---|
 | `pr` | PR number; also the filename, and what the entry's link is built from |
 | `type` | `feat` \| `fix` \| `chore` \| `revert` |
-| `summary` | customer-facing one sentence |
+| `summary` | customer-facing, one sentence |
 | `notes` | optional extended notes; rendered as their own entry |
 
-`version`, `date` and `impact` are added at release time and rejected from a
-PR's fragment — `impact` decides whether the entry renders under Possible
-Breaking Changes, and the ABI check settles that, not the PR.
+The schema is closed: any other field is an error, so a misspelling is caught
+rather than silently ignored. Whether a change is breaking is decided by the ABI
+check at release time and is never stored in a fragment.
+
+A `chore` needs no fragment — it renders nowhere, so an entry would be invisible.
+A CI-only or pure-infra change is a `chore`.
 
 ## Finding a change
 
 | You want | Look here |
 |---|---|
-| currently in-flight | `preview/*.json` on `main`, or the rendered view on the `docs` branch |
-| in the current minor line (`X.Y.*`) | root [`CHANGELOG.md`](../CHANGELOG.md) |
-| in a closed minor line (`A.B.*`) | `.changes/A.B.x.md` |
-| the fragment behind an archived entry | `git log -- .changes` |
-| exact set for a tag | GitHub Release page for that tag |
+| already released | [`CHANGELOG.md`](../CHANGELOG.md), newest release first |
+| merged but unreleased | `preview/*.json`, or the rendered view on the `docs` branch |
+| the fragment behind a released entry | `git log -- .changes` |
+| the exact set for a tag | the GitHub Release page for that tag |
