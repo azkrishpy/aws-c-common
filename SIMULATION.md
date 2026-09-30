@@ -24,7 +24,7 @@ No tag, no GitHub Release, no artifact. Nothing outside these two branches was t
 ## Things worth judging
 
 - **`.changes/` holds four files:** two unreleased fragments and two archived lines. A released fragment is deleted once rendered, so fragments never pile up.
-- **The root holds only the line being released into** — 1.2.x — and links the closed lines under Earlier releases. No release rewrites an older section.
+- **The root holds only the minor version line being released into** — 1.2.x — and links the closed lines under Earlier releases. No release rewrites an older section.
 - **The unreleased region on the release branch is one link**, straight to the docs branch's rendered file. The docs branch carries the list itself.
 - **`1.0.x.md` and `1.1.x.md` were moved, not re-rendered.** The sections are the same text with one more `..` in each link, because an archive sits a directory deeper.
 - **The hand-written `## [1.0.0]` section travelled with its line** into `1.0.x.md`. That is the adoption path: pre-existing history belongs to the line it shipped in.
