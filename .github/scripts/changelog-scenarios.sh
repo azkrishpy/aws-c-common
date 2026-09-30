@@ -16,7 +16,7 @@ pass=0
 fail=0
 
 frag() {
-  printf '{"pr":%s,"type":"%s","summary":"%s","url":"u","notes":"%s"}\n' \
+  printf '{"pr":%s,"type":"%s","summary":"%s","notes":"%s"}\n' \
     "$1" "$2" "$3" "${4:-}" > "${WORK}/.changes/preview/$1.json"
 }
 
@@ -56,12 +56,12 @@ frag 5 feat "Add SSO sign-in"
 expect 0 ok               5 "feat: add SSO sign-in"
 frag 6 fix "Mislabelled"
 expect 1 type-mismatch    6 "feat: add a thing"
-printf '{"pr":7,"type":"feat","summary":"Wrong number","url":"u","notes":""}\n' \
+printf '{"pr":7,"type":"feat","summary":"Wrong number","notes":""}\n' \
   > "${WORK}/.changes/preview/8.json"
 expect 1 pr-mismatch      8 "feat: add a thing"
 expect 0 waived-bot       9 "whatever" --bot-author "dependabot[bot]"
 # A fragment at the right path that fails the schema.
-printf '{"pr":11,"type":"feat","summary":"s","url":"u","notes":7}\n' \
+printf '{"pr":11,"type":"feat","summary":"s","notes":7}\n' \
   > "${WORK}/.changes/preview/11.json"
 expect 1 invalid-fragment 11 "feat: a thing"
 # Documentation is a chore; `doc` is not a type.

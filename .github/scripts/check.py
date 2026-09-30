@@ -1,6 +1,6 @@
 """The CI gate: assert a pull request's title and its fragment agree."""
 
-from fragments import BREAKING_SECTION, CATEGORY, STAMPED, VALID_TYPES, parse_title, validate_fragment
+from fragments import CATEGORY, VALID_TYPES, parse_title, validate_fragment
 from pathlib import Path
 import json
 import sys
@@ -130,18 +130,6 @@ def cmd_check(args):
         return 1
 
     data = json.loads(frag.read_text())
-    stamped = [k for k in STAMPED if k in data]
-    if stamped:
-        print(
-            f"ERROR: {frag} sets {', '.join(stamped)}, which the release stamps in.\n"
-            f"       `impact` decides whether the entry renders under "
-            f"\"{BREAKING_SECTION}\"; the ABI check settles that, not the\n"
-            f"       pull request. Remove {'them' if len(stamped) > 1 else 'it'}.",
-            file=sys.stderr,
-        )
-        reason("stamped-field")
-        return 1
-
     declared_pr = data.get("pr")
     if declared_pr != args.pr:
         print(

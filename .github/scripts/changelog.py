@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """Changelog fragment tooling: seed, check, render, rollup.
 
-Fragments are the source of truth. CHANGELOG.md is fully regenerated from them
-— nothing appends manually.
+A fragment per pull request under `.changes/preview/`. A release renders those
+into CHANGELOG.md and deletes them, so the rendered file is the record and
+`.changes/` only ever holds what has not shipped yet.
 
-  .changes/
-  ├── preview/<pr>.json      awaiting release; written by the pull request author
-  ├── released/<pr>.json      shipped; stamped with its version and date at release
-  └── <M>.<N>.x.md            archive of a closed minor line
+  .changes/preview/<pr>.json   awaiting release; written by the pull request author
+  CHANGELOG.md                 the record: one section per release, newest first
 """
+import argparse
+import sys
 
 from check import cmd_check
 from fragments import cmd_seed
 from release import cmd_rollup
 from render import cmd_render
-import argparse
-import sys
 
-
-# ---------- CLI ----------
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="changelog")
@@ -44,19 +41,18 @@ def main(argv=None):
                    help="repo-relative changes directory, for matching changed paths")
     c.set_defaults(func=cmd_check)
 
-    r = sub.add_parser("render", help="regenerate CHANGELOG.md from preview/ + released/")
+    r = sub.add_parser("render", help="refresh the unreleased region from preview/")
     r.add_argument("--changes-dir", default=".changes")
     r.add_argument("--changelog", default="CHANGELOG.md")
     r.set_defaults(func=cmd_render)
 
-    u = sub.add_parser("rollup",
-                       help="cut a release: a minor archives the outgoing line")
+    u = sub.add_parser("rollup", help="cut a release: render preview/ and drop it")
     u.add_argument("--version", required=True)
     u.add_argument("--date", required=True)
     u.add_argument("--changes-dir", default=".changes")
     u.add_argument("--changelog", default="CHANGELOG.md")
     u.add_argument("--docs-branch", default="docs",
-                   help="Branch named in the pointer to the in-flight changelog.")
+                   help="Branch named in the pointer to the unreleased changes.")
     u.add_argument("--minor-prs", default="",
                    help="Comma-separated PRs the ABI check labelled `minor`; "
                         "their entries render under Possible Breaking Changes.")
@@ -64,10 +60,6 @@ def main(argv=None):
 
     args = p.parse_args(argv)
     return args.func(args)
-
-
-if __name__ == "__main__":
-    sys.exit(main())
 
 
 if __name__ == "__main__":

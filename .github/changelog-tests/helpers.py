@@ -4,8 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import changelog
-import render  # noqa: E402
+import changelog  # noqa: E402
 
 
 def _changes(tmp_path):
@@ -14,8 +13,17 @@ def _changes(tmp_path):
     return str(tmp_path / ".changes")
 
 
+def _write(tmp_path, pr, pr_type, summary="s", notes="", **over):
+    """Put a fragment where an author would have committed it."""
+    _changes(tmp_path)
+    frag = {"pr": pr, "type": pr_type, "summary": summary, "notes": notes}
+    frag.update(over)
+    (tmp_path / ".changes" / "preview" / f"{pr}.json").write_text(
+        json.dumps(frag) + "\n")
+
+
 def _seed(tmp_path, pr, title):
-    """Seed writes a template, then place it where an author would have put it."""
+    """Seed writes a template; the author is the one who commits it."""
     out = tmp_path / "template.json"
     rc = changelog.main(["seed", "--pr", str(pr), "--title", title, "--out", str(out)])
     if rc == 0:
@@ -25,68 +33,39 @@ def _seed(tmp_path, pr, title):
     return rc
 
 
-def _write(tmp_path, pr, typ, summary="s", notes="", **over):
-    _changes(tmp_path)
-    frag = {"pr": pr, "type": typ, "summary": summary,
-            "notes": notes}
-    frag.update(over)
-    (tmp_path / ".changes" / "preview" / f"{pr}.json").write_text(
-        json.dumps(frag) + "\n")
-
-
-def _preview(tmp_path, name, text):
-    p = tmp_path / ".changes" / "preview" / name
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
-
-
 def _render(tmp_path):
-    text = render.render_root_changelog(tmp_path / ".changes")
-    (tmp_path / "CHANGELOG.md").write_text(text)
-    return text
+    changelog.main(["render", "--changes-dir", _changes(tmp_path),
+                    "--changelog", str(tmp_path / "CHANGELOG.md")])
+    return (tmp_path / "CHANGELOG.md").read_text()
 
 
-def _rollup(tmp_path, version, date, minor_prs=""):
-    argv = [
-        "rollup", "--version", version, "--date", date,
-        "--changes-dir", str(tmp_path / ".changes"),
-        "--changelog", str(tmp_path / "CHANGELOG.md"),
-    ]
+def _rollup(tmp_path, version, date, minor_prs="", docs_branch=""):
+    argv = ["rollup", "--version", version, "--date", date,
+            "--changes-dir", _changes(tmp_path),
+            "--changelog", str(tmp_path / "CHANGELOG.md")]
     if minor_prs:
         argv += ["--minor-prs", minor_prs]
+    if docs_branch:
+        argv += ["--docs-branch", docs_branch]
     return changelog.main(argv)
 
 
-def _released(tmp_path, pr, version, date="2026-01-01", **over):
-    """Write one already-released fragment, as a rollup would have stamped it."""
-    d = tmp_path / ".changes" / "released"
-    d.mkdir(parents=True, exist_ok=True)
-    frag = {"pr": pr, "type": "feat", "summary": "A", "notes": "",
-            "version": version, "date": date}
-    frag.update(over)
-    p = d / f"{pr}.json"
-    p.write_text(json.dumps(frag))
-    return p
+def _check(tmp_path, pr, title, bot=""):
+    argv = ["check", "--pr", str(pr), "--title", title,
+            "--changes-dir", _changes(tmp_path)]
+    if bot:
+        argv += ["--bot-author", bot]
+    return changelog.main(argv)
 
 
 def _paths(tmp_path, *entries):
-    f = tmp_path / "paths.tsv"
-    f.write_text("".join(f"{st}\t{p}\n" for st, p in entries))
-    return str(f)
-
-
-def _check(tmp_path, pr, title, bot=""):
-    args = ["check", "--pr", str(pr), "--title", title,
-            "--changes-dir", _changes(tmp_path)]
-    if bot:
-        args += ["--bot-author", bot]
-    return changelog.main(args)
+    p = tmp_path / "paths.txt"
+    p.write_text("".join(f"{st}\t{path}\n" for st, path in entries))
+    return str(p)
 
 
 def _check_paths(tmp_path, pr, title, paths_file):
-    return changelog.main([
-        "check", "--pr", str(pr), "--title", title,
-        "--changes-dir", _changes(tmp_path),
-        "--changed-paths-file", paths_file,
-        "--changes-prefix", ".changes",
-    ])
+    return changelog.main(["check", "--pr", str(pr), "--title", title,
+                           "--changes-dir", _changes(tmp_path),
+                           "--changed-paths-file", paths_file,
+                           "--changes-prefix", ".changes"])

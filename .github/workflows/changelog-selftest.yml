@@ -93,27 +93,28 @@ jobs:
           }
 
           mutate "a placeholder pr number is accepted" 'elif pr <= 0:' 'elif False:'
+          mutate "an unexpected field is ignored" 'if extra:' 'if False:'
           mutate "a whole type section stops rendering" \
             'for pr_type, cat in CATEGORY.items():' 'for pr_type, cat in list(CATEGORY.items())[:2]:'
+          mutate "a revert needs no notes" 'and not notes.strip():' 'and False:'
           mutate "seed accepts pr 0" 'if args.pr <= 0:' 'if False:'
+          mutate "the title convention is not enforced" 'bad-title' 'ok'
+          mutate "a type mismatch is tolerated" 'type-mismatch' 'ok'
           mutate "a stray fragment is tolerated" 'stray-fragment' 'ok'
           mutate "a modified fragment is tolerated" 'modified-fragment' 'ok'
-          mutate "a version may go backwards" 'if new <= highest:' 'if False:'
-          mutate "an archived line may be reopened" 'if new[:2] == line:' 'if False:'
-          mutate "a version older than an archived line is accepted" \
-            'if new[:2] < line:' 'if False:'
-          mutate "a release before 1.0.0 is rolled up" \
-            'if new < FIRST_VERSION:' 'if False:'
-          mutate "a pull request may be released twice" 'if dupes:' 'if False:'
-          mutate "an author may stamp the release fields" 'if stamped:' 'if False:'
-          mutate "a released fragment may lose its version" 'if released:' 'if False:'
-          mutate "a revert needs no notes" 'and not notes.strip():' 'and False:'
-          mutate "the title convention is not enforced" 'bad-title' 'ok'
-          mutate "an invalid released fragment is rendered anyway" \
-            'if audit_released(args.changes_dir):' 'if False:'
-          mutate "a type mismatch is tolerated" 'type-mismatch' 'ok'
-          mutate "an archived line keeps the fragments it should drop" \
-            'for frag in frags:' 'for frag in []:'
+          mutate "a fragment named for another pull request is loaded" \
+            'if path.stem.isdigit() and data.get("pr") != int(path.stem):' 'if False:'
+          mutate "an invalid fragment is released and lost" \
+            'if len(fragments) != len(on_disk):' 'if False:'
+          mutate "a malformed date is accepted" 'if not ISO_DATE_RE.match(args.date):' 'if False:'
+          mutate "the abi label stops deciding the breaking section" \
+            'breaking = [f for f in fragments if f["pr"] in minor_prs]' 'breaking = []'
+          mutate "a release rewrites what is already published" \
+            'head, _, tail = text.partition(END)' 'head, tail = skeleton(""), ""'
+          mutate "a refresh drops everything below the region" \
+            '_, _, tail = rest.partition(END)' 'tail = ""'
+          mutate "a chore renders as an entry" \
+            'if f["type"] == pr_type and f["pr"] not in minor_prs]' 'if f["pr"] not in minor_prs]'
 
           restore
           echo
@@ -158,8 +159,8 @@ jobs:
 
           git checkout -q test-docs
           grep -qF "Add a widget" CHANGELOG.md
-          grep -qF "## [Preview]" CHANGELOG.md
-          echo "merge 1: docs CHANGELOG.md carries the preview entry"
+          grep -qF "## [Unreleased]" CHANGELOG.md
+          echo "merge 1: docs CHANGELOG.md carries the unreleased entry"
 
           # The release branch must never receive a bot commit.
           git checkout -q test-main
@@ -176,8 +177,8 @@ jobs:
           git checkout -q test-docs
           grep -qF "## [1.1.0]" CHANGELOG.md
           grep -qF "Add a widget" CHANGELOG.md
-          grep -qF "## [Preview]" CHANGELOG.md
-          echo "merge 2: docs shows the release and still has a Preview block"
+          grep -qF "## [Unreleased]" CHANGELOG.md
+          echo "merge 2: docs shows the release and keeps an unreleased region"
 
           # --- idempotence: replaying the same sha again changes nothing
           BEFORE="$(git rev-parse test-docs)"
@@ -237,7 +238,7 @@ jobs:
                                  --changelog "${WORK}/CHANGELOG.md"
           diff -u "${WORK}/first.md" "${WORK}/CHANGELOG.md"
           # Nothing is released yet, so every in-flight fragment must appear.
-          for want in "## [Preview]" "([#1283]" "([#1285]"; do
+          for want in "## [Unreleased]" "([#1283]" "([#1285]"; do
             grep -qF "$want" "${WORK}/CHANGELOG.md" || { echo "MISSING: $want" >&2; exit 1; }
           done
           OUT="${RUNNER_TEMP:-/tmp}/rendered-CHANGELOG.md"
@@ -262,61 +263,60 @@ jobs:
           cd "${WORK}"
           echo "=== starting point"
           find .changes -type f | sort
+          cp "${GITHUB_WORKSPACE}/CHANGELOG.md" CHANGELOG.md
 
-          # --- patch: 1.0.2 releases the in-flight fragments
+          # --- patch: 1.0.2 releases what is in preview/
           echo "=== patch 1.0.2"
           python3 "${CL}" rollup --version 1.0.2 --date 2026-09-01 \
             --changes-dir .changes --changelog CHANGELOG.md --minor-prs 1283
-          [[ -f .changes/released/1283.json ]] || { echo "fragment did not move" >&2; exit 1; }
-          [[ -z "$(ls -A .changes/preview)" ]] || { echo "preview not drained" >&2; exit 1; }
           grep -qF "## [1.0.2]" CHANGELOG.md
-          # The label the caller passed decides the section, and it is stamped in.
-          grep -qF '"impact": "minor"' .changes/released/1283.json
+          # The label the caller passed decides the section; nothing is stored.
           grep -qF "### Possible Breaking Changes" CHANGELOG.md
+          [[ -z "$(ls -A .changes/preview)" ]] || { echo "preview not drained" >&2; exit 1; }
+          # Hand-written history below the insert point is untouched.
+          grep -qF "Official release of 1.0.0." CHANGELOG.md
           cp CHANGELOG.md /tmp/after-patch.md
 
-          # --- minor: archives 1.0.x to one file
+          # --- a second release sits above the first, which is left alone
           printf '{"pr":1290,"type":"feat","summary":"New retry strategy","notes":""}\n' \
             > .changes/preview/1290.json
-          echo "=== minor 1.1.0"
+          echo "=== release 1.1.0"
           python3 "${CL}" rollup --version 1.1.0 --date 2026-10-01 \
             --changes-dir .changes --changelog CHANGELOG.md
-          [[ -f .changes/1.0.x.md ]] || { echo "no archive" >&2; exit 1; }
-          # The archive is the whole record of that line; its fragments are gone.
-          [[ "$(ls .changes/released)" == "1290.json" ]]
-          grep -qF "## [1.0.2]" .changes/1.0.x.md
-          ! grep -qF "1.1.0" .changes/1.0.x.md
-          # The root holds the new line and links the archive.
-          grep -qF "## [1.1.0]" CHANGELOG.md
-          ! grep -qF "## [1.0.2]" CHANGELOG.md
-          grep -qF "1.0.x.md" CHANGELOG.md
+          NEW_AT=$(grep -n '^## \[1.1.0\]' CHANGELOG.md | cut -d: -f1)
+          OLD_AT=$(grep -n '^## \[1.0.2\]' CHANGELOG.md | cut -d: -f1)
+          [[ "$NEW_AT" -lt "$OLD_AT" ]] || { echo "release order wrong" >&2; exit 1; }
+          # A blank line above the older one, or the sections run together.
+          [[ -z "$(sed -n "$((OLD_AT-1))p" CHANGELOG.md)" ]] \
+            || { echo "sections run together" >&2; exit 1; }
+          echo "newest release on top, older one untouched"
 
-          # --- guards: a release must not go backwards, reopen an archived line,
-          #     predate 1.0.0, or ship a second entry for a released pull request
-          echo "=== guards"
-          ! python3 "${CL}" rollup --version 1.0.3 --date 2026-10-02 \
+          # --- a re-run of the release job must not add a second section
+          echo "=== retry"
+          python3 "${CL}" rollup --version 1.1.0 --date 2026-10-01 \
+            --changes-dir .changes --changelog CHANGELOG.md
+          [[ "$(grep -c '^## \[1.1.0\]' CHANGELOG.md)" == "1" ]] \
+            || { echo "retry duplicated the section" >&2; exit 1; }
+          echo "retry changed nothing"
+
+          # --- an invalid fragment stops a release rather than losing the entry
+          echo "=== invalid fragment"
+          printf '{ not json\n' > .changes/preview/1291.json
+          ! python3 "${CL}" rollup --version 1.1.1 --date 2026-10-02 \
               --changes-dir .changes --changelog CHANGELOG.md
-          ! python3 "${CL}" rollup --version 1.1.0 --date 2026-10-02 \
-              --changes-dir .changes --changelog CHANGELOG.md
-          ! python3 "${CL}" rollup --version 0.9.9 --date 2026-10-02 \
-              --changes-dir .changes --changelog CHANGELOG.md
-          printf '{"pr":1290,"type":"fix","summary":"Again","notes":""}\n' \
-            > .changes/preview/1290.json
-          ! python3 "${CL}" rollup --version 1.1.1 --date 2026-10-03 \
-              --changes-dir .changes --changelog CHANGELOG.md
-          rm .changes/preview/1290.json
-          echo "all four refused, as expected"
+          [[ -f .changes/preview/1291.json ]] \
+            || { echo "the invalid fragment was deleted" >&2; exit 1; }
+          rm .changes/preview/1291.json
+          echo "refused, and the fragment is still on disk"
 
           SIM="${RUNNER_TEMP:-/tmp}/sim"
           mkdir -p "$SIM"
           cp /tmp/after-patch.md "$SIM/after-patch-1.0.2.md"
-          cp CHANGELOG.md "$SIM/after-minor-1.1.0.md"
-          cp .changes/1.0.x.md "$SIM/archived-1.0.x.md"
+          cp CHANGELOG.md "$SIM/after-release-1.1.0.md"
           find .changes -type f | sort > "$SIM/final-tree.txt"
-          { echo "### After the simulated minor (root)"; echo '```markdown';
+          { echo "### After the simulated releases"; echo '```markdown';
             cat CHANGELOG.md; echo '```';
-            echo "### Archived 1.0.x"; echo '```markdown';
-            cat .changes/1.0.x.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+            echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
       - name: This repo must be untouched
         run: |
           set -euo pipefail

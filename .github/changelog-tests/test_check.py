@@ -5,8 +5,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import changelog
-import check
+import changelog  # noqa: E402
+import check  # noqa: E402
 import fragments  # noqa: E402
 from helpers import _changes, _check, _check_paths, _paths, _seed, _write  # noqa: E402
 
@@ -152,10 +152,3 @@ def test_changes_outside_the_changes_dir_are_ignored(tmp_path):
     assert _check_paths(tmp_path, 1259, "feat: x", p) == 0
 
 
-def test_an_author_may_not_stamp_release_fields(tmp_path):
-    # impact decides the Possible Breaking Changes section; a pull request that
-    # could set it would classify itself.
-    for field, value in (("impact", "minor"), ("version", "1.0.0"),
-                         ("date", "2026-01-01")):
-        _write(tmp_path, 1, "feat", summary="s", **{field: value})
-        assert _check(tmp_path, 1, "feat: s") == 1
