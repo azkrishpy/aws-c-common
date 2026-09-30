@@ -74,13 +74,13 @@ def test_the_release_branch_shows_the_pointer_not_the_unreleased_list(tmp_path):
     _rollup(tmp_path, "1.0.2", "2026-09-06")
     text = _changelog(tmp_path)
     assert "## [Unreleased]" not in text
-    assert "tree/docs/CHANGELOG.md" in text
+    assert "[here](../../blob/docs/CHANGELOG.md)" in text
 
 
 def test_the_docs_branch_name_is_the_consumers_choice(tmp_path):
     _seed(tmp_path, 1, "feat: Add a widget")
     _rollup(tmp_path, "1.0.2", "2026-09-06", docs_branch="changelog-docs")
-    assert "tree/changelog-docs/CHANGELOG.md" in _changelog(tmp_path)
+    assert "[here](../../blob/changelog-docs/CHANGELOG.md)" in _changelog(tmp_path)
 
 
 def test_the_abi_label_decides_the_breaking_section(tmp_path):

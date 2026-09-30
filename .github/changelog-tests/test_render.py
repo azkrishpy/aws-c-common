@@ -96,10 +96,11 @@ def test_a_file_with_no_markers_gains_them(tmp_path):
 
 
 def test_the_pointer_links_only_when_the_branch_name_resolves():
-    # ../../tree/<branch>/ reaches the repo root only for a one-segment name.
-    assert "(../../tree/docs/CHANGELOG.md)" in render.unreleased_pointer("docs")
+    # ../../blob/<branch>/ reaches the repo root only for a one-segment name.
+    assert render.unreleased_pointer("docs") == \
+        "Unreleased changes can be found [here](../../blob/docs/CHANGELOG.md).\n"
     slashed = render.unreleased_pointer("team/docs")
-    assert "`team/docs`" in slashed and "../../tree/team/docs" not in slashed
+    assert "`team/docs`" in slashed and "](" not in slashed
 
 
 def test_an_existing_heading_is_reused_not_duplicated(tmp_path):

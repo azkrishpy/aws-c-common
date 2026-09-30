@@ -63,15 +63,16 @@ def render_release_section(version, date, fragments, minor_prs=()):
 
 
 def unreleased_pointer(docs_branch):
-    """What the region says on the release branch: where to see what is coming.
+    """What the region says on the release branch: a link to what is coming.
 
     The link resolves from /<owner>/<repo>/blob/<branch>/CHANGELOG.md, so it only
     reaches the repo root when the branch name is one path segment. A branch with
-    a slash in it gets the name without a link.
+    a slash in it is named instead of linked, because the link would not resolve.
     """
-    ref = (f"[`{docs_branch}`](../../tree/{docs_branch}/CHANGELOG.md)"
-           if "/" not in docs_branch else f"`{docs_branch}`")
-    return f"Unreleased changes are rendered on the {ref} branch.\n"
+    if "/" in docs_branch:
+        return f"Unreleased changes are on the `{docs_branch}` branch.\n"
+    return ("Unreleased changes can be found "
+            f"[here](../../blob/{docs_branch}/CHANGELOG.md).\n")
 
 
 def render_unreleased(fragments):
