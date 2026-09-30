@@ -16,8 +16,10 @@ VALID_TYPES = {"feat", "fix", "chore", "revert"}
 # write text no customer reads.
 CATEGORY = {"feat": "Features", "fix": "Fixes", "revert": "Reverts"}
 
-# A pull request the ABI check called `minor` renders here instead of its own
+# A pull request carrying the `minor` label renders here instead of its own
 # type section: a consumer may have to change something to take the release.
+# The label settles it -- the ABI check proposes a verdict, a maintainer can
+# override it, and the release reads whatever the label ended up saying.
 BREAKING_SECTION = "Possible Breaking Changes"
 
 # Every accepted type either renders or is chore. Without this, narrowing the

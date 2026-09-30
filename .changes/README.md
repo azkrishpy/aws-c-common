@@ -33,8 +33,9 @@ regenerated, so a published entry cannot change under a reader.
 | `notes` | optional extended notes; rendered as their own entry |
 
 The schema is closed: any other field is an error, so a misspelling is caught
-rather than silently ignored. Whether a change is breaking is decided by the ABI
-check at release time and is never stored in a fragment.
+rather than silently ignored. Whether a change is breaking is settled by the
+`minor` label on the PR — the ABI check proposes it, a maintainer can override
+it, and the release reads the label. It is never stored in a fragment.
 
 A `chore` needs no fragment — it renders nowhere, so an entry would be invisible.
 A CI-only or pure-infra change is a `chore`.

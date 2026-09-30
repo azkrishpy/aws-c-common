@@ -17,6 +17,7 @@ from release import cmd_rollup
 from render import cmd_render
 
 
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="changelog")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -54,7 +55,7 @@ def main(argv=None):
     u.add_argument("--docs-branch", default="docs",
                    help="Branch named in the pointer to the unreleased changes.")
     u.add_argument("--minor-prs", default="",
-                   help="Comma-separated PRs the ABI check labelled `minor`; "
+                   help="Comma-separated PRs carrying the `minor` label; "
                         "their entries render under Possible Breaking Changes.")
     u.set_defaults(func=cmd_rollup)
 
