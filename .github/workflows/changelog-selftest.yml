@@ -152,13 +152,19 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: awslabs/aws-crt-builder
+          ref: cl/7-workflows
+          path: .crt-builder
       - name: Replay merges onto a stand-in docs branch, in a scratch repo
         run: |
           set -euo pipefail
-          # Runs .github/scripts/docs-replay.sh -- the same file CI uses -- with
-          # test-main/test-docs standing in for main/docs. No real branch, no
-          # remote, no deploy key. PUSH=false keeps it local.
-          REPLAY="${GITHUB_WORKSPACE}/.github/scripts/docs-replay.sh"
+          # Runs aws-crt-builder's changelog-replay.sh -- the same file its
+          # reusable workflows run -- with test-main/test-docs standing in for
+          # main/docs. No real branch, no remote, no deploy key. PUSH=false keeps
+          # it local.
+          REPLAY="${GITHUB_WORKSPACE}/.crt-builder/.github/workflows/changelog-replay.sh"
           WORK="$(mktemp -d)"; cd "$WORK"
           git init -q -b test-main .
           git config user.name t; git config user.email t@t
@@ -225,19 +231,20 @@ jobs:
           { echo "### docs branch CHANGELOG.md after the replay"; echo '```markdown';
             cat CHANGELOG.md; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-      - name: Defaults apply when no override is set
+      - name: The docs branch defaults when no override is set
         run: |
           set -euo pipefail
           WORK="$(mktemp -d)"; cd "$WORK"
           git init -q .; git config user.name t; git config user.email t@t
           git commit -q --allow-empty -m base
-          # No DEFAULT_BRANCH/DOCS_BRANCH in the environment: the script must
-          # resolve main and docs, which it states on its first line.
+          git commit -q --allow-empty -m second
+          # No DOCS_BRANCH in the environment: the script must resolve `docs`,
+          # which it names as it replays onto it.
           out="$(TRIGGER_SHA="$(git rev-parse HEAD)" \
                  CHANGELOG_PY="${GITHUB_WORKSPACE}/.github/scripts/changelog.py" \
-                 PUSH=false bash "${GITHUB_WORKSPACE}/.github/scripts/docs-replay.sh" 2>&1 | head -1 || true)"
+                 PUSH=false bash "${GITHUB_WORKSPACE}/.crt-builder/.github/workflows/changelog-replay.sh" 2>&1)"
           echo "$out"
-          [[ "$out" == *"from main onto docs"* ]]
+          [[ "$out" == *"onto docs"* ]]
 
   render-real-tree:
     runs-on: ubuntu-24.04

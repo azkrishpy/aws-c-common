@@ -1,48 +1,9 @@
-# Example PR check — copy into consumer repo's .github/workflows/
-# Fails PR CI if the PR title lacks a `<type>:` prefix, or if a valid
-# changelog fragment is missing.
-# The title check always runs. The fragment requirement is waived when the
-# PR touches only infra paths.
-
 name: Changelog Check
 on:
   pull_request:
-    # `edited` matters: it is what fires when someone retitles the PR, so a
-    # title fix re-runs this check instead of leaving a stale red X.
     types: [opened, edited, synchronize, reopened]
-
 jobs:
-  changelog-check:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect infra-only PRs
-        id: infra
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          # Paths considered infra-only for changelog purposes. Tune per repo.
-          INFRA_RE='^(\.github/|\.gitignore$|\.gitattributes$|CODEOWNERS$|LICENSE$|NOTICE$|README\.md$|CONTRIBUTING\.md$|docs?/)'
-          NON_INFRA=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -vE "$INFRA_RE" || true)
-          if [[ -z "$NON_INFRA" ]]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "PR touches only infra paths; changelog check skipped."
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Runs unconditionally so the PR title is validated even on infra-only
-      # PRs -- the title lands in git history either way. The infra-only
-      # detection waives only the fragment requirement.
-      - name: Assert PR title convention and fragment
-        uses: azkrishpy/aws-crt-builder/.github/actions/changelog@change-log
-        with:
-          mode: check
-          pr: ${{ github.event.pull_request.number }}
-          title: ${{ github.event.pull_request.title }}
-          require-fragment: ${{ steps.infra.outputs.skip != 'true' }}
+  check:
+    uses: awslabs/aws-crt-builder/.github/workflows/changelog-check.yml@cl/7-workflows
+    with:
+      builder-ref: cl/7-workflows
