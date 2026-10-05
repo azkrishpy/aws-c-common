@@ -1,0 +1,16 @@
+name: Pre-merge
+on:
+  pull_request_target:
+    branches: [pm-test-main]
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+jobs:
+  checks:
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: write
+      statuses: write
+    uses: azkrishpy/aws-crt-builder/.github/workflows/pre-merge-checks.yml@test/pm-live
+    with:
+      lib-name: aws-c-common
+    secrets: inherit
