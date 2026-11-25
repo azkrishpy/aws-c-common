@@ -1,0 +1,26 @@
+# FORK EXPERIMENT: the only workflow on this branch.
+name: Title check
+
+on:
+  pull_request:
+    types: [synchronize, edited]
+
+permissions: {}
+
+jobs:
+  title:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require the word "ci" in the title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          echo "event=${ACTION} title=${TITLE}"
+          if grep -qiwE 'ci' <<< "$TITLE"; then
+            echo "ok: the title contains the word ci"
+          else
+            echo "::error::the title does not contain the word ci"
+            exit 1
+          fi
