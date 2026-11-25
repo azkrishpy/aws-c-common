@@ -18,8 +18,8 @@ jobs:
           ACTION: ${{ github.event.action }}
         run: |
           echo "event=${ACTION} title=${TITLE}"
+          sleep 120
           if grep -qiwE 'ci' <<< "$TITLE"; then
-            sleep 120
             echo "ok: the title contains the word ci"
           else
             echo "::error::the title does not contain the word ci"
