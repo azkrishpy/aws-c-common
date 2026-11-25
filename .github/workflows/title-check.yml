@@ -19,6 +19,7 @@ jobs:
         run: |
           echo "event=${ACTION} title=${TITLE}"
           if grep -qiwE 'ci' <<< "$TITLE"; then
+            sleep 120
             echo "ok: the title contains the word ci"
           else
             echo "::error::the title does not contain the word ci"
